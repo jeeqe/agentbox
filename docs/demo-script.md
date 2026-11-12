@@ -16,10 +16,12 @@ the agent CLIs logged in, so it has to be recorded on your own machine.
 1. 0:00 to 0:03. In the terminal run:
    `agentbox race "implement JWT refresh rotation" --agents claude,codex,aider --test "go test ./..."`
    Three worktrees appear in the summary table.
-2. 0:03 to 0:07. The browser opens on `localhost:8484`. Three panes stream output, the
-   `RUNNING` pills pulse, and the `+/-` counters climb as each agent finishes.
-3. 0:07 to 0:10. Click **Inspect Diff** on the fastest agent with a `TESTS PASSED` pill, close
-   it, then click **Merge & Cleanup**. The cards disappear and `git log` shows the merge.
+2. 0:03 to 0:07. The browser opens on `localhost:8484`. Each agent is a line that branches off
+   `main`: dashed amber while it runs, growing as time passes, then green with a check when its
+   tests pass, or red with a cross if they fail. The first agent to pass gets the "first to pass"
+   tag and a blue **Merge** button.
+3. 0:07 to 0:10. Click **Inspect diff** on that agent so the changes open under its lane, then
+   click **Merge**. All the lanes slide away and `git log` shows the merge.
 
 If the real agents are too slow for ten seconds, trim in editing rather than speeding up the
 terminal text.

@@ -61,7 +61,7 @@ func TestDiffEndpointRendersStoredPatch(t *testing.T) {
 		t.Fatalf("GET /tasks/%d/diff status = %d, want %d; body: %s", task.ID, rec.Code, http.StatusOK, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"diff --git", "+added &lt;unsafe&gt;"} {
+	for _, want := range []string{`<code>readme.txt</code>`, `dl-add`, `<code>added &lt;unsafe&gt;</code>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("diff response does not include %q:\n%s", want, body)
 		}
@@ -211,7 +211,46 @@ func TestFinishedTaskExposesFinishTimeForTrophy(t *testing.T) {
 	if strings.Contains(body, `data-finished-ms="0"`) || !strings.Contains(body, "data-finished-ms=") {
 		t.Fatalf("finished task should carry a real data-finished-ms; body:\n%s", body)
 	}
-	if !strings.Contains(body, "winner-badge") {
-		t.Errorf("the only passing agent in a race should get the trophy on first render")
+	if !strings.Contains(body, `class="lane is-first"`) {
+		t.Errorf("the only passing agent in a race should be marked first to pass on first render")
+	}
+}
+
+func TestFinishedRunsMoveToHistory(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	run, task := seedTask(t, a)
+	if err := a.Store.SetStatus(ctx, task.ID, store.StatusMerged); err != nil {
+		t.Fatalf("set status: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	server.New(a).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	body := rec.Body.String()
+	if strings.Contains(body, "data-task-card") {
+		t.Errorf("a merged task should not get a lane:\n%s", body)
+	}
+	for _, want := range []string{"No runs yet", "Earlier runs", fmt.Sprintf("Race %d", run.ID), "merged codex"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard is missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestLaneShowsFailureDetailAndSummary(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	_, task := seedTask(t, a)
+	if err := a.Store.MarkFinished(ctx, task.ID, store.StatusFailed, 2); err != nil {
+		t.Fatalf("mark finished: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	server.New(a).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	body := rec.Body.String()
+	for _, want := range []string{"exited with code 2", "1 agents, 0 passed, 1 failed, 0 running", `data-status="failed"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard is missing %q:\n%s", want, body)
+		}
 	}
 }

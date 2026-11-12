@@ -31,15 +31,30 @@ func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	views := make([]ui.RunView, 0, len(runs))
+	var history []ui.HistoryView
 	for _, run := range runs {
 		tasks, err := s.app.Store.TasksForRun(r.Context(), run.ID)
 		if err != nil {
 			serverError(w, err)
 			return
 		}
-		views = append(views, s.runView(run, tasks, ""))
+		// Lanes are for work that still needs a decision. Finished runs
+		// become one quiet line in the history list.
+		var live []store.Task
+		for _, t := range tasks {
+			if t.Status != store.StatusMerged && t.Status != store.StatusDiscarded {
+				live = append(live, t)
+			}
+		}
+		if len(live) > 0 {
+			views = append(views, s.runView(run, live, ""))
+			continue
+		}
+		if len(history) < 8 {
+			history = append(history, historyView(run, tasks))
+		}
 	}
-	render(w, r, ui.Dashboard(views))
+	render(w, r, ui.Dashboard(views, history))
 }
 
 // run renders just one run's task grid so it can be swapped into the
@@ -62,7 +77,7 @@ func (s *server) diff(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	render(w, r, ui.DiffModal(s.taskView(*task, ""), patch))
+	render(w, r, ui.DiffPanel(s.taskView(*task, ""), patch))
 }
 
 func (s *server) merge(w http.ResponseWriter, r *http.Request) {
@@ -299,6 +314,8 @@ func (s *server) runView(run store.Run, tasks []store.Task, message string) ui.R
 		ID:            run.ID,
 		Kind:          run.Kind,
 		Prompt:        run.Prompt,
+		Base:          run.BaseRef,
+		StartedAt:     run.CreatedAt.Local().Format("15:04"),
 		FastestTaskID: fastestPassingTask(tasks),
 		Tasks:         make([]ui.TaskView, 0, len(tasks)),
 	}
@@ -325,7 +342,10 @@ func (s *server) taskViewWithSupervisor(task store.Task, message string, include
 	if includeSupervisor && running {
 		status = store.StatusRunning
 	}
-	var finishedMs int64
+	var startedMs, finishedMs int64
+	if task.StartedAt != nil {
+		startedMs = task.StartedAt.UnixMilli()
+	}
 	if task.FinishedAt != nil {
 		finishedMs = task.FinishedAt.UnixMilli()
 	}
@@ -339,7 +359,9 @@ func (s *server) taskViewWithSupervisor(task store.Task, message string, include
 		Status:     status,
 		Additions:  task.Additions,
 		Deletions:  task.Deletions,
-		Duration:   duration(task, time.Now()),
+		Clock:      clock(task, time.Now()),
+		StartedMs:  startedMs,
+		Detail:     taskDetail(task, status),
 		Running:    running,
 		Message:    message,
 	}
@@ -371,9 +393,10 @@ func fastestPassingTask(tasks []store.Task) int64 {
 	return fastestID
 }
 
-func duration(task store.Task, now time.Time) string {
+// clock formats a task's elapsed time as m:ss (h:mm:ss past an hour).
+func clock(task store.Task, now time.Time) string {
 	if task.StartedAt == nil {
-		return "—"
+		return "0:00"
 	}
 	end := now
 	if task.FinishedAt != nil {
@@ -381,18 +404,34 @@ func duration(task store.Task, now time.Time) string {
 	}
 	d := end.Sub(*task.StartedAt)
 	if d < 0 {
-		return "—"
+		d = 0
 	}
-	if d < time.Second {
-		return "<1s"
+	secs := int(d.Seconds())
+	if secs >= 3600 {
+		return fmt.Sprintf("%d:%02d:%02d", secs/3600, secs%3600/60, secs%60)
 	}
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Round(time.Second).Seconds()))
+	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
+}
+
+// taskDetail is the short second line under a lane's status. Running tasks
+// get their latest output line from the browser instead, so it stays empty.
+func taskDetail(task store.Task, status string) string {
+	switch status {
+	case store.StatusFailed:
+		switch {
+		case task.ExitCode == nil:
+			return "failed"
+		case *task.ExitCode < 0:
+			return "could not start"
+		default:
+			return fmt.Sprintf("exited with code %d", *task.ExitCode)
+		}
+	case store.StatusConflict:
+		return "conflicts with the base branch"
+	case store.StatusKilled:
+		return "stopped before it finished"
 	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm %02ds", int(d.Minutes()), int(d.Seconds())%60)
-	}
-	return fmt.Sprintf("%dh %02dm", int(d.Hours()), int(d.Minutes())%60)
+	return ""
 }
 
 func render(w http.ResponseWriter, r *http.Request, component templ.Component) {
@@ -494,4 +533,23 @@ func closeStream(w io.Writer, flusher http.Flusher) {
 	if err := writeSSE(w, "close", "done"); err == nil {
 		flusher.Flush()
 	}
+}
+
+// historyView summarises a finished run in one line.
+func historyView(run store.Run, tasks []store.Task) ui.HistoryView {
+	title := fmt.Sprintf("Fan-out %d", run.ID)
+	if run.Kind == "race" {
+		title = fmt.Sprintf("Race %d", run.ID)
+		if run.Prompt != "" {
+			title += ": " + run.Prompt
+		}
+	}
+	outcome := "discarded"
+	for _, t := range tasks {
+		if t.Status == store.StatusMerged {
+			outcome = "merged " + t.Agent
+			break
+		}
+	}
+	return ui.HistoryView{Title: title, Outcome: outcome, StartedAt: run.CreatedAt.Local().Format("Jan 2, 15:04")}
 }

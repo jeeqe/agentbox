@@ -1,0 +1,129 @@
+package ui
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// diffLine is one row of the inline diff. Old and New are line numbers, 0 when
+// the line does not exist on that side.
+type diffLine struct {
+	Kind string // file, hunk, add, del, ctx
+	Text string
+	Old  int
+	New  int
+}
+
+// parseDiff turns a unified diff into rows with line numbers taken from the
+// hunk headers. Metadata lines (index, ---, +++) are dropped, and each
+// "diff --git" line becomes a file row showing the new path.
+func parseDiff(patch string) []diffLine {
+	if strings.TrimSpace(patch) == "" {
+		return nil
+	}
+	var out []diffLine
+	var oldN, newN int
+	inHunk := false
+	for _, line := range strings.Split(strings.TrimRight(patch, "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			inHunk = false
+			name := line
+			if i := strings.LastIndex(line, " b/"); i >= 0 {
+				name = line[i+3:]
+			}
+			out = append(out, diffLine{Kind: "file", Text: name})
+		case !inHunk && (strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") ||
+			strings.HasPrefix(line, "new file") || strings.HasPrefix(line, "deleted file") || strings.HasPrefix(line, "similarity ") ||
+			strings.HasPrefix(line, "rename ") || strings.HasPrefix(line, "old mode") || strings.HasPrefix(line, "new mode")):
+			continue
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+			oldN, newN = hunkStart(line)
+			out = append(out, diffLine{Kind: "hunk", Text: line})
+		case !inHunk:
+			continue
+		case strings.HasPrefix(line, "+"):
+			out = append(out, diffLine{Kind: "add", Text: line[1:], New: newN})
+			newN++
+		case strings.HasPrefix(line, "-"):
+			out = append(out, diffLine{Kind: "del", Text: line[1:], Old: oldN})
+			oldN++
+		case strings.HasPrefix(line, `\`):
+			out = append(out, diffLine{Kind: "note", Text: strings.TrimPrefix(line, `\ `)})
+		default:
+			out = append(out, diffLine{Kind: "ctx", Text: strings.TrimPrefix(line, " "), Old: oldN, New: newN})
+			oldN++
+			newN++
+		}
+	}
+	return out
+}
+
+// hunkStart reads the starting line numbers out of "@@ -a,b +c,d @@".
+func hunkStart(header string) (int, int) {
+	fields := strings.Fields(header)
+	oldStart, newStart := 1, 1
+	for _, f := range fields {
+		switch {
+		case strings.HasPrefix(f, "-") && len(f) > 1:
+			oldStart = leadingInt(f[1:])
+		case strings.HasPrefix(f, "+") && len(f) > 1:
+			newStart = leadingInt(f[1:])
+		}
+	}
+	return oldStart, newStart
+}
+
+func leadingInt(s string) int {
+	if i := strings.IndexByte(s, ','); i >= 0 {
+		s = s[:i]
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 1
+	}
+	return n
+}
+
+func lineNo(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprint(n)
+}
+
+func diffMark(kind string) string {
+	switch kind {
+	case "add":
+		return "+"
+	case "del":
+		return "−"
+	}
+	return ""
+}
+
+templ DiffPanel(task TaskView, patch string) {
+	<section class="diff" aria-label={ "Changes from " + task.Agent }>
+		<header class="diff-head">
+			<p><b>{ task.Agent }</b> <span class="muted">{ task.Branch }</span></p>
+			<p class="diff-tally"><span class="add">+{ fmt.Sprint(task.Additions) }</span> <span class="del">−{ fmt.Sprint(task.Deletions) }</span></p>
+			<button class="btn btn-quiet" type="button" data-close-diff>Close</button>
+		</header>
+		if patch == "" {
+			<p class="diff-empty">No changes on this branch yet.</p>
+		} else {
+			<div class="diff-body" tabindex="0" role="region" aria-label="Unified diff">
+				for _, l := range parseDiff(patch) {
+					<div class={ "dl dl-" + l.Kind }>
+						<span class="dn">{ lineNo(l.Old) }</span>
+						<span class="dn">{ lineNo(l.New) }</span>
+						<span class="dm" aria-hidden="true">{ diffMark(l.Kind) }</span>
+						<code>{ l.Text }</code>
+					</div>
+				}
+			</div>
+		}
+	</section>
+}

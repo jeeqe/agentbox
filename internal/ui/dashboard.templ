@@ -5,56 +5,98 @@ import (
 	"strings"
 )
 
-templ Dashboard(runs []RunView) {
-	@Layout("AgentBox · parallel agents", DashboardBody(runs))
+templ Dashboard(runs []RunView, history []HistoryView) {
+	@Layout("AgentBox", DashboardBody(runs, history))
 }
 
-templ DashboardBody(runs []RunView) {
+templ DashboardBody(runs []RunView, history []HistoryView) {
+	<header class="topbar">
+		<a class="wordmark" href="/" aria-label="AgentBox dashboard">
+			@BranchMark()
+			<span>AgentBox</span>
+		</a>
+		<p class="summary" data-summary aria-live="polite">{ summaryText(runs) }</p>
+	</header>
 	<main class="shell" data-dashboard>
-		<header class="masthead">
-			<a class="wordmark" href="/" aria-label="AgentBox dashboard">
-				<span class="wordmark-mark" aria-hidden="true">▣</span>
-				<span>AGENTBOX</span>
-			</a>
-			<div class="masthead-note"><span class="signal"></span> parallel worktrees · local control plane</div>
-		</header>
-		<section class="dashboard-intro" aria-labelledby="dashboard-title">
-			<div>
-				<p class="eyebrow">CONTROL ROOM</p>
-				<h1 id="dashboard-title">Agents at work.</h1>
-			</div>
-			<p class="intro-aside">Each pane is an isolated git worktree. Logs, diffs, and merge decisions stay on this machine.</p>
-		</section>
 		if len(runs) == 0 {
-			<section class="empty-state">
-				<p class="eyebrow">WAITING FOR A RUN</p>
-				<h2>No agents are running yet.</h2>
-				<p>Start a fan-out or race from the AgentBox CLI; its live worktrees will appear here.</p>
+			<section class="empty">
+				<h1>No runs yet</h1>
+				<p>Start one from the repository you want the agents to work in:</p>
+				<div class="empty-cmd">
+					<code>agentbox run "add rate limiting" "write unit tests"</code>
+					<code>agentbox race "fix the flaky test" --agents claude,codex</code>
+				</div>
+				<p>Each agent gets its own worktree and branch. They show up here as they start.</p>
 			</section>
 		} else {
-			<section class="run-stack" aria-label="Agent runs">
-				for _, run := range runs {
-					@RunGrid(run)
-				}
+			for _, run := range runs {
+				@RunGrid(run)
+			}
+		}
+		if len(history) > 0 {
+			<section class="earlier" aria-label="Earlier runs">
+				<h2>Earlier runs</h2>
+				<ul>
+					for _, h := range history {
+						<li><span class="earlier-title">{ h.Title }</span><span class="earlier-outcome">{ h.Outcome }</span><span class="earlier-time">{ h.StartedAt }</span></li>
+					}
+				</ul>
 			</section>
 		}
 	</main>
 }
 
+func summaryText(runs []RunView) string {
+	var total, passed, failed, running int
+	for _, run := range runs {
+		for _, task := range run.Tasks {
+			switch task.Status {
+			case "passed":
+				passed++
+			case "failed", "conflict":
+				failed++
+			case "running", "queued":
+				running++
+			}
+			total++
+		}
+	}
+	return fmt.Sprintf("%d agents, %d passed, %d failed, %d running", total, passed, failed, running)
+}
+
+func runTitle(run RunView) string {
+	if run.Kind == "race" && run.Prompt != "" {
+		return run.Prompt
+	}
+	if len(run.Tasks) == 1 {
+		return "1 task in parallel"
+	}
+	return fmt.Sprintf("%d tasks in parallel", len(run.Tasks))
+}
+
+func runMeta(run RunView) string {
+	kind := "Fan-out"
+	if run.Kind == "race" {
+		kind = "Race"
+	}
+	parts := []string{fmt.Sprintf("%s %d", kind, run.ID), fmt.Sprintf("%d agents", len(run.Tasks))}
+	if run.Base != "" {
+		parts = append(parts, "from "+run.Base)
+	}
+	if run.StartedAt != "" {
+		parts = append(parts, "started "+run.StartedAt)
+	}
+	return strings.Join(parts, " · ")
+}
+
 templ RunGrid(run RunView) {
 	<section class="run" id={ "run-" + fmt.Sprint(run.ID) } data-run-kind={ run.Kind }>
 		<header class="run-header">
-			<div class="run-heading">
-				<p class="eyebrow">RUN { fmt.Sprint(run.ID) } · { run.Kind }</p>
-				if run.Kind == "race" && run.Prompt != "" {
-					<p class="run-prompt">{ run.Prompt }</p>
-				} else {
-					<p class="run-prompt muted">parallel task group</p>
-				}
-			</div>
-			<div class="run-count"><span>{ fmt.Sprint(len(run.Tasks)) }</span> agents</div>
+			<h1 class="run-title">{ runTitle(run) }</h1>
+			<p class="run-meta">{ runMeta(run) }</p>
 		</header>
-		<div class="task-grid" style={ "--task-count: " + fmt.Sprint(len(run.Tasks)) }>
+		<div class="timeline" data-timeline>
+			<div class="axis-row"><div class="axis" data-axis aria-hidden="true"></div></div>
 			for _, task := range run.Tasks {
 				@taskCard(task, run.Kind == "race" && task.ID == run.FastestTaskID && run.FastestTaskID != 0)
 			}
@@ -69,7 +111,7 @@ templ TaskCard(task TaskView) {
 templ taskCard(task TaskView, fastest bool) {
 	<article
 		id={ taskID(task.ID) }
-		class={ "task-card status-" + task.Status }
+		class={ laneClass(fastest) }
 		data-task-card
 		data-task-id={ fmt.Sprint(task.ID) }
 		data-status={ task.Status }
@@ -77,77 +119,111 @@ templ taskCard(task TaskView, fastest bool) {
 		sse-connect={ taskPath(task.ID, "stream") }
 		sse-close="close"
 	>
-		<header class="task-header">
-			<div class="agent-identity">
-				<div class="agent-token" aria-hidden="true">{ agentGlyph(task.Agent) }</div>
-				<div>
-					<h2>{ task.Agent }</h2>
-					<p>{ task.Branch }</p>
-				</div>
+		<div class="lane-id">
+			<span class="bullet" aria-hidden="true">{ agentGlyph(task.Agent) }</span>
+			<div class="lane-name">
+				<h2>{ task.Agent } <span class="port" title="PORT given to this agent">:{ fmt.Sprint(task.Port) }</span></h2>
+				<p title={ task.Branch }>{ task.Branch }</p>
 			</div>
-			<div class="task-header-right">
-				if fastest {
-					<span class="winner-badge" title="Fastest passing agent">🏆 fastest</span>
-				}
-				<span class="port">:{ fmt.Sprint(task.Port) }</span>
-			</div>
-		</header>
-		@TaskMeta(task)
-		<div class="terminal-wrap">
-			<div class="terminal-chrome"><span></span><span></span><span></span><span class="terminal-title">live output</span></div>
-			<pre id={ logID(task.ID) } class="terminal-output" sse-swap="log" hx-swap="beforeend" aria-label={ task.Agent + " terminal output" }><span class="terminal-wait">connecting to agent stream…</span></pre>
 		</div>
-		if task.Message != "" {
-			<p class="task-message" role="status">{ task.Message }</p>
-		}
-		<footer class="task-actions">
-			<button class="button button-secondary" type="button" hx-get={ taskPath(task.ID, "diff") } hx-target="#modal-root" hx-swap="innerHTML">Inspect Diff</button>
-			<button class="button button-primary" type="button" hx-post={ taskPath(task.ID, "merge") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML" data-merge-action disabled?={ isRunning(task.Status) }>Merge &amp; Cleanup</button>
-			<div class="action-spacer"></div>
-			<button class="button button-quiet" type="button" hx-post={ taskPath(task.ID, "kill") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML" data-kill-action disabled?={ !isRunning(task.Status) }>Kill</button>
-			<button class="button button-quiet" type="button" hx-post={ taskPath(task.ID, "restart") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML" data-restart-action disabled?={ isRunning(task.Status) }>Restart</button>
-			<button class="button button-quiet" type="button" hx-post={ taskPath(task.ID, "discard") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML">Discard</button>
-		</footer>
+		@TaskMeta(task)
+		<div class="lane-actions">
+			<button class="btn btn-quiet a-log" type="button" data-toggle-log aria-expanded="false">Output</button>
+			<button class="btn btn-quiet a-discard" type="button" hx-post={ taskPath(task.ID, "discard") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML">Discard</button>
+			<button class="btn a-kill" type="button" hx-post={ taskPath(task.ID, "kill") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML" data-kill-action>Stop</button>
+			<button class="btn a-restart" type="button" hx-post={ taskPath(task.ID, "restart") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML" data-restart-action>Retry</button>
+			<button class="btn a-rebase" type="button" hx-post={ taskPath(task.ID, "rebase") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML">Rebase</button>
+			<button class="btn a-diff" type="button" hx-get={ taskPath(task.ID, "diff") } hx-target={ "#" + drawerID(task.ID) } hx-swap="innerHTML">Inspect diff</button>
+			<button class="btn btn-merge a-merge" type="button" hx-post={ taskPath(task.ID, "merge") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML" data-merge-action title="Merge into the base branch and remove this worktree">Merge</button>
+		</div>
+		<div class="lane-drawer">
+			if task.Message != "" {
+				<p class="lane-message" role="status">{ task.Message }</p>
+			}
+			<div id={ drawerID(task.ID) } class="diff-slot"></div>
+			<div class="log" data-log hidden>
+				<pre id={ logID(task.ID) } class="log-output" sse-swap="log" hx-swap="beforeend" tabindex="0" aria-label={ task.Agent + " output" }></pre>
+			</div>
+		</div>
 	</article>
 }
 
+// TaskMeta holds everything the status stream replaces: the lane line, its end
+// station, the status text and the diff counters. display: contents lets its
+// children sit directly in the lane's grid.
 templ TaskMeta(task TaskView) {
-	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } data-finished-ms={ fmt.Sprint(task.FinishedMs) } sse-swap="status" hx-swap="outerHTML">
-		@StatusPill(task)
-		<div id={ diffID(task.ID) } class="diff-counters" aria-label={ fmt.Sprintf("%d additions and %d deletions", task.Additions, task.Deletions) }>
-			<span class="add">+{ fmt.Sprint(task.Additions) }</span>
-			<span class="divider">/</span>
-			<span class="del">-{ fmt.Sprint(task.Deletions) }</span>
-		</div>
-		<span class="duration">{ task.Duration }</span>
+	<div id={ statusID(task.ID) } class="lane-meta" data-task-status={ task.Status } data-started-ms={ fmt.Sprint(task.StartedMs) } data-finished-ms={ fmt.Sprint(task.FinishedMs) } sse-swap="status" hx-swap="outerHTML">
+		@laneBody(task)
 	</div>
 }
 
-// StatusUpdate is sent as an SSE "status" event. It replaces the meta block so
-// the pill and diff counters update without repainting the terminal pane.
+// StatusUpdate is sent as an SSE "status" event and replaces TaskMeta in place.
 templ StatusUpdate(task TaskView) {
-	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } data-finished-ms={ fmt.Sprint(task.FinishedMs) } sse-swap="status" hx-swap="outerHTML">
-		@StatusPill(task)
-		<div id={ diffID(task.ID) } class="diff-counters" aria-label={ fmt.Sprintf("%d additions and %d deletions", task.Additions, task.Deletions) }>
-			<span class="add">+{ fmt.Sprint(task.Additions) }</span>
-			<span class="divider">/</span>
-			<span class="del">-{ fmt.Sprint(task.Deletions) }</span>
+	@TaskMeta(task)
+}
+
+templ laneBody(task TaskView) {
+	<div class="lane-track">
+		<div class="scale">
+			<span class="line"></span>
+			<span class="station">
+				@StationIcon(task.Status)
+			</span>
+			<div class="lane-label">
+				<p class="lane-line1"><b class="lane-time" data-clock>{ task.Clock }</b> <span class="lane-state">{ statusLabel(task.Status) }</span></p>
+				<div class="lane-line2">
+					<span class="first-tag">
+						@FlagIcon()
+						first to pass
+					</span>
+					<span class="lane-detail" data-tick>{ task.Detail }</span>
+					<span id={ diffID(task.ID) } class="lane-stats" aria-label={ fmt.Sprintf("%d lines added, %d removed", task.Additions, task.Deletions) }>
+						<span class="add">+{ fmt.Sprint(task.Additions) }</span>
+						<span class="del">−{ fmt.Sprint(task.Deletions) }</span>
+					</span>
+				</div>
+			</div>
 		</div>
-		<span class="duration">{ task.Duration }</span>
 	</div>
 }
 
-templ StatusPill(task TaskView) {
-	<span class={ "status-pill status-" + task.Status + " status-pill-" + task.Status }>{ statusLabel(task.Status) }</span>
+templ StationIcon(status string) {
+	switch status {
+		case "passed", "merged":
+			<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 6.4 5 8.8l4.6-5.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+		case "failed", "conflict":
+			<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>
+		case "killed", "discarded":
+			<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 6h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>
+		default:
+			<span class="pulse"></span>
+	}
+}
+
+templ FlagIcon() {
+	<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M2.5 1v10M2.5 2h7L7.6 4.4 9.5 6.8h-7" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"></path></svg>
+}
+
+templ BranchMark() {
+	<svg class="mark" viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M5 2v16M5 6h4a6 6 0 0 1 6 6v0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="5" cy="3" r="2" fill="currentColor"></circle><circle cx="15" cy="13" r="2.4" fill="currentColor"></circle></svg>
 }
 
 templ TaskLogLine(stream string, line string) {
 	<span class={ "terminal-line terminal-" + stream }>{ line }</span>
 }
 
+func drawerID(id int64) string { return fmt.Sprintf("task-drawer-%d", id) }
+
+// agentGlyph is a two-letter badge so agents sharing an initial (claude, codex)
+// still look different.
 func agentGlyph(agent string) string {
-	if agent == "" {
+	agent = strings.TrimPrefix(agent, "cmd:")
+	runes := []rune(agent)
+	switch len(runes) {
+	case 0:
 		return "?"
+	case 1:
+		return strings.ToUpper(string(runes))
 	}
-	return strings.ToUpper(string([]rune(agent)[0]))
+	return strings.ToUpper(string(runes[:1])) + strings.ToLower(string(runes[1:2]))
 }

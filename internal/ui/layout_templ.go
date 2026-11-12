@@ -12,7 +12,6 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"embed"
 	"fmt"
-	"strings"
 )
 
 // StaticFS contains the dashboard assets. Keeping them beside the templates makes
@@ -31,11 +30,22 @@ type TaskView struct {
 	Port      int
 	Additions int
 	Deletions int
-	Duration  string
-	// FinishedMs is the finish time in Unix milliseconds, 0 while still running.
+	// Clock is the elapsed time as m:ss.
+	Clock string
+	// StartedMs and FinishedMs are Unix milliseconds; 0 when not started or still running.
+	StartedMs  int64
 	FinishedMs int64
-	Running    bool
-	Message    string
+	// Detail is the short second line under the status, for example the exit code.
+	Detail  string
+	Running bool
+	Message string
+}
+
+// HistoryView is one finished run, shown as a single line under the live runs.
+type HistoryView struct {
+	Title     string
+	Outcome   string
+	StartedAt string
 }
 
 // RunView is one fan-out or race shown on the dashboard.
@@ -43,6 +53,8 @@ type RunView struct {
 	ID            int64
 	Kind          string
 	Prompt        string
+	Base          string
+	StartedAt     string
 	Tasks         []TaskView
 	FastestTaskID int64
 }
@@ -56,22 +68,31 @@ func isRunning(status string) bool            { return status == "running" || st
 func statusLabel(status string) string {
 	switch status {
 	case "running", "queued":
-		return "RUNNING"
+		return "Running"
 	case "passed":
-		return "TESTS PASSED"
+		return "Tests passed"
 	case "failed":
-		return "FAILED"
+		return "Failed"
 	case "conflict":
-		return "CONFLICT"
+		return "Merge conflict"
 	case "killed":
-		return "KILLED"
+		return "Stopped"
 	case "merged":
-		return "MERGED"
+		return "Merged"
 	case "discarded":
-		return "DISCARDED"
+		return "Discarded"
 	default:
-		return strings.ToUpper(status)
+		return status
 	}
+}
+
+// laneClass marks the lane that finished first in a race.
+func laneClass(fastest bool) string {
+	class := "lane"
+	if fastest {
+		class += " is-first"
+	}
+	return class
 }
 
 func Layout(title string, body templ.Component) templ.Component {
@@ -98,13 +119,13 @@ func Layout(title string, body templ.Component) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/layout.templ`, Line: 75, Col: 17}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/layout.templ`, Line: 96, Col: 17}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><link rel=\"stylesheet\" href=\"/static/agentbox.css\"><link rel=\"stylesheet\" href=\"/static/agentbox-extra.css\"><script defer src=\"/static/htmx.min.js\"></script><script defer src=\"/static/sse.min.js\"></script><script defer src=\"/static/agentbox.js\"></script></head><body>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><link rel=\"stylesheet\" href=\"/static/agentbox.css\"><script defer src=\"/static/htmx.min.js\"></script><script defer src=\"/static/sse.min.js\"></script><script defer src=\"/static/agentbox.js\"></script></head><body>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -112,7 +133,7 @@ func Layout(title string, body templ.Component) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div id=\"modal-root\" aria-live=\"polite\"></div></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
