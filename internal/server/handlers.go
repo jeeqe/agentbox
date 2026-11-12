@@ -126,6 +126,9 @@ func (s *server) taskAction(w http.ResponseWriter, r *http.Request, action strin
 			message = err.Error()
 		}
 	}
+	if err == nil && (action == "merge" || action == "discard") {
+		s.removeCards(w, r, task, action)
+	}
 	render(w, r, ui.TaskCard(s.taskView(*updated, message)))
 }
 
@@ -187,6 +190,7 @@ func (s *server) stream(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 	if terminal(task.Status) {
+		closeStream(w, flusher)
 		return
 	}
 
@@ -226,6 +230,7 @@ func (s *server) stream(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 			if terminal(task.Status) {
+				closeStream(w, flusher)
 				return
 			}
 		}
@@ -456,4 +461,32 @@ func (s *server) writeStatusEvent(w io.Writer, ctx context.Context, task store.T
 		return err
 	}
 	return writeSSE(w, "status", fragment)
+}
+
+// removeCards asks the page, through a response header, to animate cards out:
+// the acted-on task, and for a merged race also the discarded losers.
+func (s *server) removeCards(w http.ResponseWriter, r *http.Request, task *store.Task, action string) {
+	ids := []int64{task.ID}
+	if action == "merge" {
+		if siblings, err := s.app.Store.TasksForRun(r.Context(), task.RunID); err == nil {
+			for _, sib := range siblings {
+				if sib.ID != task.ID && sib.Status == store.StatusDiscarded {
+					ids = append(ids, sib.ID)
+				}
+			}
+		}
+	}
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatInt(id, 10)
+	}
+	w.Header().Set("X-Agentbox-Remove", strings.Join(parts, ","))
+}
+
+// closeStream tells the page the task is finished. The sse-close attribute on
+// the card closes the EventSource, so the browser does not reconnect and replay.
+func closeStream(w io.Writer, flusher http.Flusher) {
+	if err := writeSSE(w, "close", "done"); err == nil {
+		flusher.Flush()
+	}
 }

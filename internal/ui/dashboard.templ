@@ -73,8 +73,9 @@ templ taskCard(task TaskView, fastest bool) {
 		data-task-card
 		data-task-id={ fmt.Sprint(task.ID) }
 		data-status={ task.Status }
-		data-remove-after-swap?={ task.Status == "merged" }
+		hx-ext="sse"
 		sse-connect={ taskPath(task.ID, "stream") }
+		sse-close="close"
 	>
 		<header class="task-header">
 			<div class="agent-identity">
@@ -94,7 +95,7 @@ templ taskCard(task TaskView, fastest bool) {
 		@TaskMeta(task)
 		<div class="terminal-wrap">
 			<div class="terminal-chrome"><span></span><span></span><span></span><span class="terminal-title">live output</span></div>
-			<pre id={ logID(task.ID) } class="terminal-output" sse-swap="log" aria-label={ task.Agent + " terminal output" }><span class="terminal-wait">connecting to agent stream…</span></pre>
+			<pre id={ logID(task.ID) } class="terminal-output" sse-swap="log" hx-swap="beforeend" aria-label={ task.Agent + " terminal output" }><span class="terminal-wait">connecting to agent stream…</span></pre>
 		</div>
 		if task.Message != "" {
 			<p class="task-message" role="status">{ task.Message }</p>
@@ -111,7 +112,7 @@ templ taskCard(task TaskView, fastest bool) {
 }
 
 templ TaskMeta(task TaskView) {
-	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } sse-swap="status">
+	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } sse-swap="status" hx-swap="outerHTML">
 		@StatusPill(task)
 		<div id={ diffID(task.ID) } class="diff-counters" aria-label={ fmt.Sprintf("%d additions and %d deletions", task.Additions, task.Deletions) }>
 			<span class="add">+{ fmt.Sprint(task.Additions) }</span>
@@ -122,11 +123,10 @@ templ TaskMeta(task TaskView) {
 	</div>
 }
 
-// StatusUpdate is sent as an SSE event. The local htmx helper applies its
-// out-of-band outer swap so the pill and diff counters update without repainting
-// the terminal pane.
+// StatusUpdate is sent as an SSE "status" event. It replaces the meta block so
+// the pill and diff counters update without repainting the terminal pane.
 templ StatusUpdate(task TaskView) {
-	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } sse-swap="status" hx-swap-oob="outerHTML">
+	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } sse-swap="status" hx-swap="outerHTML">
 		@StatusPill(task)
 		<div id={ diffID(task.ID) } class="diff-counters" aria-label={ fmt.Sprintf("%d additions and %d deletions", task.Additions, task.Deletions) }>
 			<span class="add">+{ fmt.Sprint(task.Additions) }</span>

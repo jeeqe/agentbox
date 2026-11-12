@@ -170,3 +170,29 @@ func runGit(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
+
+func TestMergeRaceWinnerRemovesAllCards(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	_, tasks, err := a.Race(ctx, "add a file", []string{"cmd:echo one > one.txt", "cmd:echo two > two.txt"})
+	if err != nil {
+		t.Fatalf("race: %v", err)
+	}
+	a.Sup.Wait()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/tasks/%d/merge", tasks[0].ID), nil)
+	server.New(a).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("merge status = %d; body: %s", rec.Code, rec.Body.String())
+	}
+	got := rec.Header().Get("X-Agentbox-Remove")
+	want := fmt.Sprintf("%d,%d", tasks[0].ID, tasks[1].ID)
+	if got != want {
+		t.Fatalf("X-Agentbox-Remove = %q, want %q", got, want)
+	}
+	loser, err := a.Store.GetTask(ctx, tasks[1].ID)
+	if err != nil || loser.Status != store.StatusDiscarded {
+		t.Fatalf("loser = %+v, err %v; want discarded", loser, err)
+	}
+}
