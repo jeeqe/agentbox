@@ -15,9 +15,9 @@ import (
 const (
 	StatusQueued    = "queued"
 	StatusRunning   = "running"
-	StatusPassed    = "passed"    // agent exited 0 (and tests, if configured, passed)
-	StatusFailed    = "failed"    // non-zero exit
-	StatusConflict  = "conflict"  // merge/rebase conflict
+	StatusPassed    = "passed"   // agent exited 0 (and tests, if configured, passed)
+	StatusFailed    = "failed"   // non-zero exit
+	StatusConflict  = "conflict" // merge/rebase conflict
 	StatusKilled    = "killed"
 	StatusMerged    = "merged"
 	StatusDiscarded = "discarded"
