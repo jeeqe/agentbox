@@ -1,0 +1,21 @@
+# Build and release outputs
+/bin/
+/dist/
+/agentbox
+/agentbox.exe
+
+# Local AgentBox state
+/.agentbox/
+*.db
+*.db-shm
+*.db-wal
+
+# Test and coverage outputs
+coverage.out
+*.coverprofile
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+*~

@@ -115,6 +115,10 @@ func (m *Manager) linkEnvFiles(dst string) error {
 		if _, err := os.Lstat(target); err == nil {
 			continue // tracked in git (e.g. .env.example) — leave it alone
 		}
+		// Keep the linked file out of snapshots so secrets never land on the branch.
+		if err := m.excludeLocally(filepath.Base(src)); err != nil {
+			return err
+		}
 		if err := os.Symlink(src, target); err != nil {
 			data, rerr := os.ReadFile(src)
 			if rerr != nil {
@@ -126,6 +130,39 @@ func (m *Manager) linkEnvFiles(dst string) error {
 		}
 	}
 	return nil
+}
+
+// excludeLocally adds name to the repo's .git/info/exclude (never committed) if missing.
+// Tracked files are unaffected by excludes, so this only hides untracked env files.
+func (m *Manager) excludeLocally(name string) error {
+	out, err := m.git(context.Background(), m.Repo, "rev-parse", "--git-path", "info/exclude")
+	if err != nil {
+		return err
+	}
+	p := strings.TrimSpace(out)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(m.Repo, p)
+	}
+	data, _ := os.ReadFile(p)
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(l) == name {
+			return nil
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	prefix := ""
+	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
+		prefix = "\n"
+	}
+	_, err = f.WriteString(prefix + name + "\n")
+	return err
 }
 
 func (m *Manager) allocPort(used map[int]bool) (int, error) {

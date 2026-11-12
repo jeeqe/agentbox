@@ -1,0 +1,153 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+)
+
+templ Dashboard(runs []RunView) {
+	@Layout("AgentBox · parallel agents", DashboardBody(runs))
+}
+
+templ DashboardBody(runs []RunView) {
+	<main class="shell" data-dashboard>
+		<header class="masthead">
+			<a class="wordmark" href="/" aria-label="AgentBox dashboard">
+				<span class="wordmark-mark" aria-hidden="true">▣</span>
+				<span>AGENTBOX</span>
+			</a>
+			<div class="masthead-note"><span class="signal"></span> parallel worktrees · local control plane</div>
+		</header>
+		<section class="dashboard-intro" aria-labelledby="dashboard-title">
+			<div>
+				<p class="eyebrow">CONTROL ROOM</p>
+				<h1 id="dashboard-title">Agents at work.</h1>
+			</div>
+			<p class="intro-aside">Each pane is an isolated git worktree. Logs, diffs, and merge decisions stay on this machine.</p>
+		</section>
+		if len(runs) == 0 {
+			<section class="empty-state">
+				<p class="eyebrow">WAITING FOR A RUN</p>
+				<h2>No agents are running yet.</h2>
+				<p>Start a fan-out or race from the AgentBox CLI; its live worktrees will appear here.</p>
+			</section>
+		} else {
+			<section class="run-stack" aria-label="Agent runs">
+				for _, run := range runs {
+					@RunGrid(run)
+				}
+			</section>
+		}
+	</main>
+}
+
+templ RunGrid(run RunView) {
+	<section class="run" id={ "run-" + fmt.Sprint(run.ID) } data-run-kind={ run.Kind }>
+		<header class="run-header">
+			<div class="run-heading">
+				<p class="eyebrow">RUN { fmt.Sprint(run.ID) } · { run.Kind }</p>
+				if run.Kind == "race" && run.Prompt != "" {
+					<p class="run-prompt">{ run.Prompt }</p>
+				} else {
+					<p class="run-prompt muted">parallel task group</p>
+				}
+			</div>
+			<div class="run-count"><span>{ fmt.Sprint(len(run.Tasks)) }</span> agents</div>
+		</header>
+		<div class="task-grid" style={ "--task-count: " + fmt.Sprint(len(run.Tasks)) }>
+			for _, task := range run.Tasks {
+				@taskCard(task, run.Kind == "race" && task.ID == run.FastestTaskID && run.FastestTaskID != 0)
+			}
+		</div>
+	</section>
+}
+
+templ TaskCard(task TaskView) {
+	@taskCard(task, false)
+}
+
+templ taskCard(task TaskView, fastest bool) {
+	<article
+		id={ taskID(task.ID) }
+		class={ "task-card status-" + task.Status }
+		data-task-card
+		data-task-id={ fmt.Sprint(task.ID) }
+		data-status={ task.Status }
+		data-remove-after-swap?={ task.Status == "merged" }
+		sse-connect={ taskPath(task.ID, "stream") }
+	>
+		<header class="task-header">
+			<div class="agent-identity">
+				<div class="agent-token" aria-hidden="true">{ agentGlyph(task.Agent) }</div>
+				<div>
+					<h2>{ task.Agent }</h2>
+					<p>{ task.Branch }</p>
+				</div>
+			</div>
+			<div class="task-header-right">
+				if fastest {
+					<span class="winner-badge" title="Fastest passing agent">🏆 fastest</span>
+				}
+				<span class="port">:{ fmt.Sprint(task.Port) }</span>
+			</div>
+		</header>
+		@TaskMeta(task)
+		<div class="terminal-wrap">
+			<div class="terminal-chrome"><span></span><span></span><span></span><span class="terminal-title">live output</span></div>
+			<pre id={ logID(task.ID) } class="terminal-output" sse-swap="log" aria-label={ task.Agent + " terminal output" }><span class="terminal-wait">connecting to agent stream…</span></pre>
+		</div>
+		if task.Message != "" {
+			<p class="task-message" role="status">{ task.Message }</p>
+		}
+		<footer class="task-actions">
+			<button class="button button-secondary" type="button" hx-get={ taskPath(task.ID, "diff") } hx-target="#modal-root" hx-swap="innerHTML">Inspect Diff</button>
+			<button class="button button-primary" type="button" hx-post={ taskPath(task.ID, "merge") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML" data-merge-action disabled?={ isRunning(task.Status) }>Merge &amp; Cleanup</button>
+			<div class="action-spacer"></div>
+			<button class="button button-quiet" type="button" hx-post={ taskPath(task.ID, "kill") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML" data-kill-action disabled?={ !isRunning(task.Status) }>Kill</button>
+			<button class="button button-quiet" type="button" hx-post={ taskPath(task.ID, "restart") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML" data-restart-action disabled?={ isRunning(task.Status) }>Restart</button>
+			<button class="button button-quiet" type="button" hx-post={ taskPath(task.ID, "discard") } hx-target={ "#" + taskID(task.ID) } hx-swap="outerHTML">Discard</button>
+		</footer>
+	</article>
+}
+
+templ TaskMeta(task TaskView) {
+	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } sse-swap="status">
+		@StatusPill(task)
+		<div id={ diffID(task.ID) } class="diff-counters" aria-label={ fmt.Sprintf("%d additions and %d deletions", task.Additions, task.Deletions) }>
+			<span class="add">+{ fmt.Sprint(task.Additions) }</span>
+			<span class="divider">/</span>
+			<span class="del">-{ fmt.Sprint(task.Deletions) }</span>
+		</div>
+		<span class="duration">{ task.Duration }</span>
+	</div>
+}
+
+// StatusUpdate is sent as an SSE event. The local htmx helper applies its
+// out-of-band outer swap so the pill and diff counters update without repainting
+// the terminal pane.
+templ StatusUpdate(task TaskView) {
+	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } sse-swap="status" hx-swap-oob="outerHTML">
+		@StatusPill(task)
+		<div id={ diffID(task.ID) } class="diff-counters" aria-label={ fmt.Sprintf("%d additions and %d deletions", task.Additions, task.Deletions) }>
+			<span class="add">+{ fmt.Sprint(task.Additions) }</span>
+			<span class="divider">/</span>
+			<span class="del">-{ fmt.Sprint(task.Deletions) }</span>
+		</div>
+		<span class="duration">{ task.Duration }</span>
+	</div>
+}
+
+templ StatusPill(task TaskView) {
+	<span class={ "status-pill status-" + task.Status + " status-pill-" + task.Status }>{ statusLabel(task.Status) }</span>
+}
+
+templ TaskLogLine(stream string, line string) {
+	<span class={ "terminal-line terminal-" + stream }>{ line }</span>
+}
+
+func agentGlyph(agent string) string {
+	if agent == "" {
+		return "?"
+	}
+	return strings.ToUpper(string([]rune(agent)[0]))
+}

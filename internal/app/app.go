@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/agentbox-dev/agentbox/internal/runner"
-	"github.com/agentbox-dev/agentbox/internal/store"
-	"github.com/agentbox-dev/agentbox/internal/worktree"
+	"github.com/jeeqe/agentbox/internal/runner"
+	"github.com/jeeqe/agentbox/internal/store"
+	"github.com/jeeqe/agentbox/internal/worktree"
 )
 
 // App wires the store, worktree manager and supervisor together for one repository.

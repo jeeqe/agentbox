@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agentbox-dev/agentbox/internal/store"
-	"github.com/agentbox-dev/agentbox/internal/worktree"
+	"github.com/jeeqe/agentbox/internal/store"
+	"github.com/jeeqe/agentbox/internal/worktree"
 )
 
 // AgentSpec describes how to invoke an agent CLI non-interactively.
@@ -29,7 +29,7 @@ type AgentSpec struct {
 // where $PROMPT is available in the environment.
 var Agents = map[string]AgentSpec{
 	"claude":   {"claude", func(p string) []string { return []string{"-p", p, "--dangerously-skip-permissions"} }},
-	"codex":    {"codex", func(p string) []string { return []string{"exec", "--full-auto", p} }},
+	"codex":    {"codex", func(p string) []string { return []string{"exec", "-s", "workspace-write", p} }},
 	"aider":    {"aider", func(p string) []string { return []string{"--yes-always", "--message", p} }},
 	"opencode": {"opencode", func(p string) []string { return []string{"run", p} }},
 	"gemini":   {"gemini", func(p string) []string { return []string{"-p", p, "--yolo"} }},

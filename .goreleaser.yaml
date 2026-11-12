@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+project_name: agentbox
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: agentbox
+    main: ./cmd/agentbox
+    binary: agentbox
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }} -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    ids:
+      - agentbox
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ title .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+
+# A fine-grained token for jeeqe/homebrew-tap is required when publishing.
+# Casks are GoReleaser's supported way to distribute prebuilt binaries with Brew.
+homebrew_casks:
+  - name: agentbox
+    ids:
+      - default
+    binaries:
+      - agentbox
+    homepage: https://github.com/jeeqe/agentbox
+    description: Run multiple AI coding agents in parallel git worktrees.
+    repository:
+      owner: jeeqe
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+
+release:
+  footer: |
+    Install AgentBox with:
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/jeeqe/agentbox/main/scripts/install.sh | sh
+    ```
