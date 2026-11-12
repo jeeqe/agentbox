@@ -7,7 +7,7 @@ Run parallel coding agents in isolated Git worktrees from a single 13.5 MB Go bi
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Binary size](https://img.shields.io/badge/binary-13.5%20MB-informational)
 
-<!-- demo gif goes here: docs/demo.gif -->
+![AgentBox dashboard demo](docs/demo.gif)
 
 ## Quickstart
 
