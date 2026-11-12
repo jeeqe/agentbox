@@ -91,13 +91,13 @@ func TestAllocPortSkipsBoundAndUsedPorts(t *testing.T) {
 	requireLoopback(t)
 	repo := testRepository(t)
 	m := testManager(t, repo)
-	m.BasePort = availablePort(t)
-
-	l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", m.BasePort))
+	// Hold the listener from the start so a parallel test can't take the port in between.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("reserve base port: %v", err)
 	}
 	t.Cleanup(func() { _ = l.Close() })
+	m.BasePort = l.Addr().(*net.TCPAddr).Port
 	port, err := m.allocPort(map[int]bool{m.BasePort + 1: true})
 	if err != nil {
 		t.Fatalf("allocPort: %v", err)
