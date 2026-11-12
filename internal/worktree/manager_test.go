@@ -216,7 +216,7 @@ func availablePort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("find available port: %v", err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port
 }
 

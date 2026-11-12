@@ -20,7 +20,7 @@ type server struct {
 // New returns the dashboard handler for a single AgentBox application.
 func New(a *app.App) http.Handler {
 	staticFiles, err := fs.Sub(ui.StaticFS, "static")
-	var static http.Handler = http.NotFoundHandler()
+	static := http.NotFoundHandler()
 	if err == nil {
 		static = http.StripPrefix("/static/", http.FileServer(http.FS(staticFiles)))
 	}

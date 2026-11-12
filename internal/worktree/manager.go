@@ -174,7 +174,7 @@ func (m *Manager) allocPort(used map[int]bool) (int, error) {
 		if err != nil {
 			continue
 		}
-		l.Close()
+		_ = l.Close()
 		return p, nil
 	}
 	return 0, errors.New("no free port found")

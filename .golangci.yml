@@ -5,6 +5,18 @@ run:
 
 linters:
   default: standard
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*github.com/jeeqe/agentbox/internal/app.App).Close
+        - (*github.com/jeeqe/agentbox/internal/store.Store).Close
 
 formatters:
   enable:

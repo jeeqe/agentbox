@@ -166,11 +166,6 @@ func (sv *Supervisor) emitLog(taskID int64, stream, text string) {
 	sv.publish(Event{TaskID: taskID, Kind: "log", Log: l})
 }
 
-func (sv *Supervisor) setStatus(taskID int64, status string) {
-	_ = sv.Store.SetStatus(context.Background(), taskID, status)
-	sv.publish(Event{TaskID: taskID, Kind: "status", Status: status})
-}
-
 // runCmd runs a command to completion in dir, streaming output into the task log.
 func (sv *Supervisor) runCmd(ctx context.Context, cmd *exec.Cmd, dir string, env []string, taskID int64) (int, error) {
 	cmd.Dir = dir
