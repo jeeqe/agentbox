@@ -32,8 +32,10 @@ type TaskView struct {
 	Additions int
 	Deletions int
 	Duration  string
-	Running   bool
-	Message   string
+	// FinishedMs is the finish time in Unix milliseconds, 0 while still running.
+	FinishedMs int64
+	Running    bool
+	Message    string
 }
 
 // RunView is one fan-out or race shown on the dashboard.
@@ -96,7 +98,7 @@ func Layout(title string, body templ.Component) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/layout.templ`, Line: 72, Col: 17}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/layout.templ`, Line: 75, Col: 17}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {

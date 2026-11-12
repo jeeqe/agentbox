@@ -196,3 +196,22 @@ func TestMergeRaceWinnerRemovesAllCards(t *testing.T) {
 		t.Fatalf("loser = %+v, err %v; want discarded", loser, err)
 	}
 }
+
+func TestFinishedTaskExposesFinishTimeForTrophy(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	_, task := seedTask(t, a)
+	if err := a.Store.MarkFinished(ctx, task.ID, store.StatusPassed, 0); err != nil {
+		t.Fatalf("mark finished: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	server.New(a).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	body := rec.Body.String()
+	if strings.Contains(body, `data-finished-ms="0"`) || !strings.Contains(body, "data-finished-ms=") {
+		t.Fatalf("finished task should carry a real data-finished-ms; body:\n%s", body)
+	}
+	if !strings.Contains(body, "winner-badge") {
+		t.Errorf("the only passing agent in a race should get the trophy on first render")
+	}
+}

@@ -16,8 +16,36 @@
 		card.querySelectorAll("[data-restart-action]").forEach((b) => (b.disabled = live));
 	}
 
+	// In a race the first agent to pass gets the trophy. Later finishers never
+	// overtake it, so this is safe to re-run after every update.
+	function markFastest(run) {
+		let best = null;
+		let bestMs = Infinity;
+		run.querySelectorAll("[data-task-card]").forEach((card) => {
+			const meta = card.querySelector("[data-task-status]");
+			const ms = meta ? Number(meta.dataset.finishedMs) : 0;
+			if (meta && meta.dataset.taskStatus === "passed" && ms > 0 && ms < bestMs) {
+				best = card;
+				bestMs = ms;
+			}
+		});
+		run.querySelectorAll("[data-task-card]").forEach((card) => {
+			const badge = card.querySelector(".winner-badge");
+			if (card !== best && badge) badge.remove();
+			if (card === best && !badge) {
+				const right = card.querySelector(".task-header-right");
+				const el = document.createElement("span");
+				el.className = "winner-badge";
+				el.title = "Fastest passing agent";
+				el.textContent = "\u{1F3C6} fastest";
+				if (right) right.prepend(el);
+			}
+		});
+	}
+
 	function refresh() {
 		document.querySelectorAll("[data-task-card]").forEach(syncCard);
+		document.querySelectorAll('.run[data-run-kind="race"]').forEach(markFastest);
 		document.querySelectorAll(".terminal-output").forEach((pane) => {
 			const wait = pane.querySelector(".terminal-wait");
 			if (wait && pane.querySelector(".terminal-line")) wait.remove();

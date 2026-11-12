@@ -325,18 +325,23 @@ func (s *server) taskViewWithSupervisor(task store.Task, message string, include
 	if includeSupervisor && running {
 		status = store.StatusRunning
 	}
+	var finishedMs int64
+	if task.FinishedAt != nil {
+		finishedMs = task.FinishedAt.UnixMilli()
+	}
 	return ui.TaskView{
-		ID:        task.ID,
-		RunID:     task.RunID,
-		Agent:     task.Agent,
-		Branch:    task.Branch,
-		Port:      task.Port,
-		Status:    status,
-		Additions: task.Additions,
-		Deletions: task.Deletions,
-		Duration:  duration(task, time.Now()),
-		Running:   running,
-		Message:   message,
+		FinishedMs: finishedMs,
+		ID:         task.ID,
+		RunID:      task.RunID,
+		Agent:      task.Agent,
+		Branch:     task.Branch,
+		Port:       task.Port,
+		Status:     status,
+		Additions:  task.Additions,
+		Deletions:  task.Deletions,
+		Duration:   duration(task, time.Now()),
+		Running:    running,
+		Message:    message,
 	}
 }
 

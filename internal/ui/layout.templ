@@ -8,6 +8,7 @@ import (
 
 // StaticFS contains the dashboard assets. Keeping them beside the templates makes
 // the dashboard self-contained when AgentBox is compiled into one binary.
+//
 //go:embed static/*
 var StaticFS embed.FS
 
@@ -22,8 +23,10 @@ type TaskView struct {
 	Additions int
 	Deletions int
 	Duration  string
-	Running   bool
-	Message   string
+	// FinishedMs is the finish time in Unix milliseconds, 0 while still running.
+	FinishedMs int64
+	Running    bool
+	Message    string
 }
 
 // RunView is one fan-out or race shown on the dashboard.
@@ -35,12 +38,12 @@ type RunView struct {
 	FastestTaskID int64
 }
 
-func taskID(id int64) string { return fmt.Sprintf("task-card-%d", id) }
-func statusID(id int64) string { return fmt.Sprintf("task-status-%d", id) }
-func diffID(id int64) string { return fmt.Sprintf("task-diff-%d", id) }
-func logID(id int64) string { return fmt.Sprintf("task-log-%d", id) }
+func taskID(id int64) string                  { return fmt.Sprintf("task-card-%d", id) }
+func statusID(id int64) string                { return fmt.Sprintf("task-status-%d", id) }
+func diffID(id int64) string                  { return fmt.Sprintf("task-diff-%d", id) }
+func logID(id int64) string                   { return fmt.Sprintf("task-log-%d", id) }
 func taskPath(id int64, action string) string { return fmt.Sprintf("/tasks/%d/%s", id, action) }
-func isRunning(status string) bool { return status == "running" || status == "queued" }
+func isRunning(status string) bool            { return status == "running" || status == "queued" }
 func statusLabel(status string) string {
 	switch status {
 	case "running", "queued":
@@ -63,7 +66,7 @@ func statusLabel(status string) string {
 }
 
 templ Layout(title string, body templ.Component) {
-	<!doctype html>
+	<!DOCTYPE html>
 	<html lang="en">
 		<head>
 			<meta charset="utf-8"/>

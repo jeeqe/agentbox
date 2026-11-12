@@ -112,7 +112,7 @@ templ taskCard(task TaskView, fastest bool) {
 }
 
 templ TaskMeta(task TaskView) {
-	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } sse-swap="status" hx-swap="outerHTML">
+	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } data-finished-ms={ fmt.Sprint(task.FinishedMs) } sse-swap="status" hx-swap="outerHTML">
 		@StatusPill(task)
 		<div id={ diffID(task.ID) } class="diff-counters" aria-label={ fmt.Sprintf("%d additions and %d deletions", task.Additions, task.Deletions) }>
 			<span class="add">+{ fmt.Sprint(task.Additions) }</span>
@@ -126,7 +126,7 @@ templ TaskMeta(task TaskView) {
 // StatusUpdate is sent as an SSE "status" event. It replaces the meta block so
 // the pill and diff counters update without repainting the terminal pane.
 templ StatusUpdate(task TaskView) {
-	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } sse-swap="status" hx-swap="outerHTML">
+	<div id={ statusID(task.ID) } class="task-meta" data-task-status={ task.Status } data-finished-ms={ fmt.Sprint(task.FinishedMs) } sse-swap="status" hx-swap="outerHTML">
 		@StatusPill(task)
 		<div id={ diffID(task.ID) } class="diff-counters" aria-label={ fmt.Sprintf("%d additions and %d deletions", task.Additions, task.Deletions) }>
 			<span class="add">+{ fmt.Sprint(task.Additions) }</span>
