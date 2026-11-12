@@ -100,7 +100,7 @@ go install github.com/jeeqe/agentbox/cmd/agentbox@latest
 # Script (checks the release checksum)
 curl -fsSL https://raw.githubusercontent.com/jeeqe/agentbox/main/scripts/install.sh | sh
 
-# Homebrew (once the first release is out)
+# Homebrew, macOS only (works once the first release is tagged)
 brew install jeeqe/tap/agentbox
 ```
 
