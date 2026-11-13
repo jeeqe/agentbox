@@ -47,7 +47,29 @@ func Open(repoDir, testCmd string, parallelism int) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{Store: st, WT: wt, Sup: runner.NewSupervisor(st, wt, testCmd, parallelism)}, nil
+	a := &App{Store: st, WT: wt, Sup: runner.NewSupervisor(st, wt, testCmd, parallelism)}
+	a.reconcileOrphans(context.Background())
+	return a, nil
+}
+
+// reconcileOrphans marks tasks as stopped when the process that was running
+// them is gone (a crash, kill -9 or reboot). Without this they would show as
+// running forever, with nothing able to stop them.
+func (a *App) reconcileOrphans(ctx context.Context) {
+	active, err := a.Store.ActiveTasks(ctx)
+	if err != nil {
+		return
+	}
+	self := os.Getpid()
+	for _, t := range active {
+		if t.Status != store.StatusRunning && t.Status != store.StatusQueued {
+			continue
+		}
+		if t.OwnerPID == self || processAlive(t.OwnerPID) {
+			continue
+		}
+		_ = a.Store.MarkFinished(ctx, t.ID, store.StatusKilled, -1)
+	}
 }
 
 func (a *App) Close() error { return a.Store.Close() }
@@ -80,6 +102,9 @@ func (a *App) launch(ctx context.Context, kind, prompt string, specs []Spec) (*s
 	base, err := a.WT.CurrentBranch(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+	if base == "HEAD" {
+		return nil, nil, errors.New("the repository is on a detached HEAD; check out a branch first so results have somewhere to merge")
 	}
 	run := &store.Run{Kind: kind, Prompt: prompt, RepoPath: a.WT.Repo, BaseRef: base}
 	if err := a.Store.CreateRun(ctx, run); err != nil {

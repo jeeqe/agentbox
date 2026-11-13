@@ -38,5 +38,5 @@ func New(a *app.App) http.Handler {
 	mux.HandleFunc("POST /tasks/{id}/rebase", s.rebase)
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.Handle("GET /static/{path...}", static)
-	return mux
+	return guard(mux)
 }

@@ -18,7 +18,7 @@ import (
 func TestHealthz(t *testing.T) {
 	a := newTestApp(t)
 	rec := httptest.NewRecorder()
-	server.New(a).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	server.New(a).ServeHTTP(rec, loopbackRequest(http.MethodGet, "/healthz"))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /healthz status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
@@ -30,7 +30,7 @@ func TestDashboardRendersStoredRun(t *testing.T) {
 	_, task := seedTask(t, a)
 
 	rec := httptest.NewRecorder()
-	server.New(a).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	server.New(a).ServeHTTP(rec, loopbackRequest(http.MethodGet, "/"))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET / status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
@@ -55,7 +55,7 @@ func TestDiffEndpointRendersStoredPatch(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	server.New(a).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/tasks/%d/diff", task.ID), nil))
+	server.New(a).ServeHTTP(rec, loopbackRequest(http.MethodGet, fmt.Sprintf("/tasks/%d/diff", task.ID)))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /tasks/%d/diff status = %d, want %d; body: %s", task.ID, rec.Code, http.StatusOK, rec.Body.String())
@@ -83,7 +83,7 @@ func TestTaskStreamReplaysEscapedLogs(t *testing.T) {
 	// current status frame synchronously. ResponseRecorder implements
 	// http.Flusher, making this a real SSE-handler test without a loopback bind.
 	rec := httptest.NewRecorder()
-	server.New(a).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/tasks/%d/stream", task.ID), nil))
+	server.New(a).ServeHTTP(rec, loopbackRequest(http.MethodGet, fmt.Sprintf("/tasks/%d/stream", task.ID)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET task stream status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -181,7 +181,7 @@ func TestMergeRaceWinnerRemovesAllCards(t *testing.T) {
 	a.Sup.Wait()
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/tasks/%d/merge", tasks[0].ID), nil)
+	req := loopbackRequest(http.MethodPost, fmt.Sprintf("/tasks/%d/merge", tasks[0].ID))
 	server.New(a).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("merge status = %d; body: %s", rec.Code, rec.Body.String())
@@ -206,7 +206,7 @@ func TestFinishedTaskExposesFinishTimeForTrophy(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	server.New(a).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	server.New(a).ServeHTTP(rec, loopbackRequest(http.MethodGet, "/"))
 	body := rec.Body.String()
 	if strings.Contains(body, `data-finished-ms="0"`) || !strings.Contains(body, "data-finished-ms=") {
 		t.Fatalf("finished task should carry a real data-finished-ms; body:\n%s", body)
@@ -225,7 +225,7 @@ func TestFinishedRunsMoveToHistory(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	server.New(a).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	server.New(a).ServeHTTP(rec, loopbackRequest(http.MethodGet, "/"))
 	body := rec.Body.String()
 	if strings.Contains(body, "data-task-card") {
 		t.Errorf("a merged task should not get a lane:\n%s", body)
@@ -246,11 +246,59 @@ func TestLaneShowsFailureDetailAndSummary(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	server.New(a).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	server.New(a).ServeHTTP(rec, loopbackRequest(http.MethodGet, "/"))
 	body := rec.Body.String()
 	for _, want := range []string{"exited with code 2", "1 agents, 0 passed, 1 failed, 0 running", `data-status="failed"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard is missing %q:\n%s", want, body)
 		}
+	}
+}
+
+// loopbackRequest is a request as a browser would send it to the local dashboard.
+func loopbackRequest(method, target string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	req.Host = "127.0.0.1:8484"
+	return req
+}
+
+func TestGuardRejectsForeignHostAndCrossSitePosts(t *testing.T) {
+	a := newTestApp(t)
+	_, task := seedTask(t, a)
+	h := server.New(a)
+	merge := fmt.Sprintf("/tasks/%d/discard", task.ID)
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		mutate func(*http.Request)
+		want   int
+	}{
+		{"rebinding host", http.MethodGet, "/", func(r *http.Request) { r.Host = "evil.example:8484" }, http.StatusForbidden},
+		{"localhost name ok", http.MethodGet, "/healthz", func(r *http.Request) { r.Host = "localhost:8484" }, http.StatusOK},
+		{"ipv6 loopback ok", http.MethodGet, "/healthz", func(r *http.Request) { r.Host = "[::1]:8484" }, http.StatusOK},
+		{"cross-site post", http.MethodPost, merge, func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") }, http.StatusForbidden},
+		{"foreign origin post", http.MethodPost, merge, func(r *http.Request) { r.Header.Set("Origin", "https://evil.example") }, http.StatusForbidden},
+		{"other local port post", http.MethodPost, merge, func(r *http.Request) { r.Header.Set("Origin", "http://127.0.0.1:9999") }, http.StatusForbidden},
+		{"same-origin post ok", http.MethodPost, merge, func(r *http.Request) {
+			r.Header.Set("Origin", "http://127.0.0.1:8484")
+			r.Header.Set("Sec-Fetch-Site", "same-origin")
+		}, http.StatusOK},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := loopbackRequest(c.method, c.path)
+			c.mutate(req)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != c.want {
+				t.Fatalf("status = %d, want %d; body: %s", rec.Code, c.want, rec.Body.String())
+			}
+		})
+	}
+	got, err := a.Store.GetTask(context.Background(), task.ID)
+	if err != nil || got.Status != store.StatusDiscarded {
+		t.Fatalf("the allowed same-origin discard should have run once; task = %+v, err %v", got, err)
 	}
 }

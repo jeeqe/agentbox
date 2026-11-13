@@ -125,7 +125,7 @@ func Layout(title string, body templ.Component) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><link rel=\"stylesheet\" href=\"/static/agentbox.css\"><script defer src=\"/static/htmx.min.js\"></script><script defer src=\"/static/sse.min.js\"></script><script defer src=\"/static/agentbox.js\"></script></head><body>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><link rel=\"stylesheet\" href=\"/static/agentbox.css\"><script defer src=\"/static/htmx.min.js\"></script><script defer src=\"/static/sse.min.js\"></script><script defer src=\"/static/agentbox.js\"></script></head><body>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

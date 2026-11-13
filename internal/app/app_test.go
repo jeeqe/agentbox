@@ -150,3 +150,62 @@ func newAppRepo(t *testing.T) string {
 	git("-c", "user.name=AgentBox Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
 	return repo
 }
+
+func TestOrphanedTasksAreStoppedOnOpen(t *testing.T) {
+	repo := newAppRepo(t)
+	t.Setenv("AGENTBOX_HOME", t.TempDir())
+	ctx := context.Background()
+
+	a, err := Open(repo, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &store.Run{Kind: "fan-out", RepoPath: a.WT.Repo, BaseRef: "main"}
+	if err := a.Store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	// A task whose owner is a pid that cannot exist, as left by a crashed process.
+	orphan := &store.Task{RunID: run.ID, Agent: "x", Prompt: "p", Branch: "b1", WorktreePath: "/nowhere", OwnerPID: 2147483646, Status: store.StatusRunning}
+	// A task owned by this live process must be left alone.
+	mine := &store.Task{RunID: run.ID, Agent: "x", Prompt: "p", Branch: "b2", WorktreePath: "/nowhere", Status: store.StatusRunning}
+	for _, tk := range []*store.Task{orphan, mine} {
+		if err := a.Store.CreateTask(ctx, tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := Open(repo, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	got, _ := b.Store.GetTask(ctx, orphan.ID)
+	if got.Status != store.StatusKilled {
+		t.Errorf("orphaned task status = %q, want %q", got.Status, store.StatusKilled)
+	}
+	got, _ = b.Store.GetTask(ctx, mine.ID)
+	if got.Status != store.StatusRunning {
+		t.Errorf("live task status = %q, want it left running", got.Status)
+	}
+}
+
+func TestLaunchRefusesDetachedHead(t *testing.T) {
+	repo := newAppRepo(t)
+	t.Setenv("AGENTBOX_HOME", t.TempDir())
+	cmd := exec.Command("git", "checkout", "-q", "--detach")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("detach: %v\n%s", err, out)
+	}
+	a, err := Open(repo, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if _, _, err := a.FanOut(context.Background(), "cmd:true", []string{"x"}); err == nil || !strings.Contains(err.Error(), "detached HEAD") {
+		t.Fatalf("err = %v, want a detached HEAD error", err)
+	}
+}

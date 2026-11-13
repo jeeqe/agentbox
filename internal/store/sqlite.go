@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver, no CGO
@@ -42,6 +43,7 @@ type Task struct {
 	Branch       string
 	WorktreePath string
 	Port         int
+	OwnerPID     int // process that started the task; used to spot tasks orphaned by a crash
 	Status       string
 	ExitCode     *int
 	Additions    int
@@ -102,10 +104,44 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := addColumnIfMissing(db, "tasks", "owner_pid", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+// addColumnIfMissing upgrades databases created by an earlier version.
+func addColumnIfMissing(db *sql.DB, table, column, decl string) error {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl)
+	return err
+}
 
 func ts(t time.Time) int64 { return t.UnixMilli() }
 
@@ -172,9 +208,12 @@ func (s *Store) CreateTask(ctx context.Context, t *Task) error {
 	if t.Status == "" {
 		t.Status = StatusQueued
 	}
+	if t.OwnerPID == 0 {
+		t.OwnerPID = os.Getpid()
+	}
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO tasks(run_id,agent,prompt,branch,worktree_path,port,status) VALUES(?,?,?,?,?,?,?)`,
-		t.RunID, t.Agent, t.Prompt, t.Branch, t.WorktreePath, t.Port, t.Status)
+		`INSERT INTO tasks(run_id,agent,prompt,branch,worktree_path,port,owner_pid,status) VALUES(?,?,?,?,?,?,?,?)`,
+		t.RunID, t.Agent, t.Prompt, t.Branch, t.WorktreePath, t.Port, t.OwnerPID, t.Status)
 	if err != nil {
 		return err
 	}
@@ -182,7 +221,7 @@ func (s *Store) CreateTask(ctx context.Context, t *Task) error {
 	return err
 }
 
-const taskCols = `id,run_id,agent,prompt,branch,worktree_path,port,status,exit_code,additions,deletions,started_at,finished_at`
+const taskCols = `id,run_id,agent,prompt,branch,worktree_path,port,owner_pid,status,exit_code,additions,deletions,started_at,finished_at`
 
 type scanner interface{ Scan(...any) error }
 
@@ -190,7 +229,7 @@ func scanTask(r scanner) (*Task, error) {
 	var t Task
 	var exit sql.NullInt64
 	var st, fin sql.NullInt64
-	if err := r.Scan(&t.ID, &t.RunID, &t.Agent, &t.Prompt, &t.Branch, &t.WorktreePath, &t.Port,
+	if err := r.Scan(&t.ID, &t.RunID, &t.Agent, &t.Prompt, &t.Branch, &t.WorktreePath, &t.Port, &t.OwnerPID,
 		&t.Status, &exit, &t.Additions, &t.Deletions, &st, &fin); err != nil {
 		return nil, err
 	}
@@ -239,7 +278,7 @@ func (s *Store) queryTasks(ctx context.Context, q string, args ...any) ([]Task, 
 
 // MarkStarted sets status=running and started_at.
 func (s *Store) MarkStarted(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET status='running', started_at=?, finished_at=NULL, exit_code=NULL WHERE id=?`, ts(time.Now()), id)
+	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET status='running', owner_pid=?, started_at=?, finished_at=NULL, exit_code=NULL WHERE id=?`, os.Getpid(), ts(time.Now()), id)
 	return err
 }
 

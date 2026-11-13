@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -145,4 +146,39 @@ func TestStoreCRUDAndWAL(t *testing.T) {
 	if len(all) != 1 || all[0].ID != task.ID {
 		t.Fatalf("AllTasks = %#v, want created task", all)
 	}
+}
+
+func TestOpenUpgradesDatabaseWithoutOwnerPID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The tasks table as released in v0.1.0, before owner_pid existed.
+	_, err = old.Exec(`CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, prompt TEXT NOT NULL DEFAULT '', repo_path TEXT NOT NULL, base_ref TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL, agent TEXT NOT NULL, prompt TEXT NOT NULL, branch TEXT NOT NULL, worktree_path TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'queued', exit_code INTEGER, additions INTEGER NOT NULL DEFAULT 0, deletions INTEGER NOT NULL DEFAULT 0, started_at INTEGER, finished_at INTEGER);
+INSERT INTO runs(kind,repo_path,base_ref,created_at) VALUES('race','/r','main',1);
+INSERT INTO tasks(run_id,agent,prompt,branch,worktree_path,status) VALUES(1,'claude','p','b','/w','passed');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("open old database: %v", err)
+	}
+	defer s.Close()
+	tasks, err := s.TasksForRun(context.Background(), 1)
+	if err != nil || len(tasks) != 1 || tasks[0].OwnerPID != 0 || tasks[0].Status != StatusPassed {
+		t.Fatalf("tasks = %+v, err %v", tasks, err)
+	}
+	// Opening again must not try to add the column twice.
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	s2.Close()
 }
