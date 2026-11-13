@@ -209,3 +209,53 @@ func TestLaunchRefusesDetachedHead(t *testing.T) {
 		t.Fatalf("err = %v, want a detached HEAD error", err)
 	}
 }
+
+func TestBaseFlagStartsFromAnotherBranchAndNeedsItCheckedOutToMerge(t *testing.T) {
+	repo := newAppRepo(t)
+	t.Setenv("AGENTBOX_HOME", t.TempDir())
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("branch", "release")
+	ctx := context.Background()
+	a, err := Open(repo, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	a.Base = "no-such-branch"
+	if _, _, err := a.FanOut(ctx, "cmd:true", []string{"x"}); err == nil || !strings.Contains(err.Error(), "not a local branch") {
+		t.Fatalf("err = %v, want a not-a-local-branch error", err)
+	}
+
+	a.Base = "release"
+	run, tasks, err := a.FanOut(ctx, "cmd:echo hi > new.txt", []string{"add a file"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Sup.Wait()
+	if run.BaseRef != "release" {
+		t.Fatalf("BaseRef = %q, want release", run.BaseRef)
+	}
+	// The repository is on its default branch, not release, so merging must refuse.
+	err = a.MergeAndCleanup(ctx, tasks[0].ID)
+	if err == nil || !strings.Contains(err.Error(), `merges into "release"`) {
+		t.Fatalf("merge err = %v, want a message asking to check out release", err)
+	}
+	git("checkout", "-q", "release")
+	if err := a.MergeAndCleanup(ctx, tasks[0].ID); err != nil {
+		t.Fatalf("merge after checkout: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "new.txt")); err != nil {
+		t.Fatalf("merged file missing on release: %v", err)
+	}
+	if logs, _ := a.Store.Logs(ctx, tasks[0].ID, 0, 10); len(logs) != 0 {
+		t.Errorf("logs of a merged task should be cleared, found %d lines", len(logs))
+	}
+}

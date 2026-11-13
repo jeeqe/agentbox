@@ -79,6 +79,12 @@ func Slug(s string) string {
 	return s
 }
 
+// BranchExists reports whether a local branch with this name exists.
+func (m *Manager) BranchExists(ctx context.Context, name string) bool {
+	_, err := m.git(ctx, m.Repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
+	return err == nil
+}
+
 // Create adds a worktree on a new branch "agentbox/<runID>-<n>-<slug>" cut from base.
 // It links env files and allocates a free port, skipping anything in usedPorts.
 func (m *Manager) Create(ctx context.Context, runID int64, n int, label, base string, usedPorts map[int]bool) (*Info, error) {
@@ -233,7 +239,7 @@ func (m *Manager) Merge(ctx context.Context, branch, base string) error {
 		return err
 	}
 	if cur != base {
-		return fmt.Errorf("main working tree is on %q, expected %q", cur, base)
+		return fmt.Errorf("the main working tree is on %q but this run merges into %q; check out %q and try again", cur, base, base)
 	}
 	st, err := m.git(ctx, m.Repo, "status", "--porcelain", "--untracked-files=no")
 	if err != nil {

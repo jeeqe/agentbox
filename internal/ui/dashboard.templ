@@ -115,6 +115,7 @@ templ taskCard(task TaskView, fastest bool) {
 		data-task-card
 		data-task-id={ fmt.Sprint(task.ID) }
 		data-status={ task.Status }
+		data-foreign?={ task.Foreign }
 		hx-ext="sse"
 		sse-connect={ taskPath(task.ID, "stream") }
 		sse-close="close"

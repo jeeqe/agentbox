@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -104,7 +106,7 @@ func (s *server) rebase(w http.ResponseWriter, r *http.Request) {
 // actionable failures. HTMX swaps successful 2xx responses by default, which
 // lets a conflict show its CONFLICT state and explanation in place.
 func (s *server) taskAction(w http.ResponseWriter, r *http.Request, action string) {
-	task, _, ok := s.lookupTask(w, r)
+	task, run, ok := s.lookupTask(w, r)
 	if !ok {
 		return
 	}
@@ -142,7 +144,8 @@ func (s *server) taskAction(w http.ResponseWriter, r *http.Request, action strin
 		}
 	}
 	if err == nil && (action == "merge" || action == "discard") {
-		s.removeCards(w, r, task, action)
+		removed := s.removeCards(w, r, task, action)
+		setNotice(w, action, task.Agent, run.BaseRef, removed)
 	}
 	render(w, r, ui.TaskCard(s.taskView(*updated, message)))
 }
@@ -211,10 +214,50 @@ func (s *server) stream(w http.ResponseWriter, r *http.Request) {
 
 	keepAlive := time.NewTicker(20 * time.Second)
 	defer keepAlive.Stop()
+	// A task run by another agentbox process never reaches this process's
+	// supervisor, so its output and status are followed through the database.
+	var pollC <-chan time.Time
+	if s.foreignTask(*task) {
+		poll := time.NewTicker(700 * time.Millisecond)
+		defer poll.Stop()
+		pollC = poll.C
+	}
+	var polls int
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-pollC:
+			polls++
+			if polls%8 == 0 {
+				s.app.ReconcileOrphans(r.Context())
+			}
+			logs, err := s.app.Store.Logs(r.Context(), task.ID, lastID, 500)
+			if err != nil {
+				return
+			}
+			for _, log := range logs {
+				if err := s.writeLogEvent(w, r.Context(), log); err != nil {
+					return
+				}
+				lastID = log.ID
+			}
+			updated, err := s.app.Store.GetTask(r.Context(), task.ID)
+			if err != nil {
+				return
+			}
+			changed := updated.Status != task.Status || updated.Additions != task.Additions || updated.Deletions != task.Deletions
+			task = updated
+			if changed {
+				if err := s.writeStatusEvent(w, r.Context(), *task); err != nil {
+					return
+				}
+			}
+			flusher.Flush()
+			if terminal(task.Status) {
+				closeStream(w, flusher)
+				return
+			}
 		case <-keepAlive.C:
 			if _, err := io.WriteString(w, ": keep-alive\n\n"); err != nil {
 				return
@@ -342,6 +385,7 @@ func (s *server) taskViewWithSupervisor(task store.Task, message string, include
 	if includeSupervisor && running {
 		status = store.StatusRunning
 	}
+	foreign := s.foreignTask(task)
 	var startedMs, finishedMs int64
 	if task.StartedAt != nil {
 		startedMs = task.StartedAt.UnixMilli()
@@ -361,7 +405,8 @@ func (s *server) taskViewWithSupervisor(task store.Task, message string, include
 		Deletions:  task.Deletions,
 		Clock:      clock(task, time.Now()),
 		StartedMs:  startedMs,
-		Detail:     taskDetail(task, status),
+		Detail:     taskDetail(task, status, foreign),
+		Foreign:    foreign,
 		Running:    running,
 		Message:    message,
 	}
@@ -416,9 +461,12 @@ func clock(task store.Task, now time.Time) string {
 // taskDetail is the short second line under a lane's status. A running task
 // starts with the command that launched it; the browser replaces that with the
 // latest non-empty output line once there is one.
-func taskDetail(task store.Task, status string) string {
+func taskDetail(task store.Task, status string, foreign bool) string {
 	switch status {
 	case store.StatusRunning, store.StatusQueued:
+		if foreign {
+			return fmt.Sprintf("running in another agentbox process (pid %d)", task.OwnerPID)
+		}
 		return "$ " + strings.TrimPrefix(task.Agent, "cmd:")
 	case store.StatusFailed:
 		switch {
@@ -512,7 +560,7 @@ func (s *server) writeStatusEvent(w io.Writer, ctx context.Context, task store.T
 
 // removeCards asks the page, through a response header, to animate cards out:
 // the acted-on task, and for a merged race also the discarded losers.
-func (s *server) removeCards(w http.ResponseWriter, r *http.Request, task *store.Task, action string) {
+func (s *server) removeCards(w http.ResponseWriter, r *http.Request, task *store.Task, action string) int {
 	ids := []int64{task.ID}
 	if action == "merge" {
 		if siblings, err := s.app.Store.TasksForRun(r.Context(), task.RunID); err == nil {
@@ -528,6 +576,29 @@ func (s *server) removeCards(w http.ResponseWriter, r *http.Request, task *store
 		parts[i] = strconv.FormatInt(id, 10)
 	}
 	w.Header().Set("X-Agentbox-Remove", strings.Join(parts, ","))
+	return len(ids) - 1
+}
+
+// setNotice sends a one-line confirmation for the page to show after a lane
+// leaves. It is percent-encoded because agent names can be any text.
+func setNotice(w http.ResponseWriter, action, agent, base string, removed int) {
+	var text string
+	switch action {
+	case "merge":
+		text = fmt.Sprintf("Merged %s into %s.", agent, base)
+		switch removed {
+		case 0:
+		case 1:
+			text += " Removed 1 other worktree."
+		default:
+			text += fmt.Sprintf(" Removed %d other worktrees.", removed)
+		}
+	case "discard":
+		text = fmt.Sprintf("Discarded %s and removed its worktree.", agent)
+	default:
+		return
+	}
+	w.Header().Set("X-Agentbox-Notice", url.PathEscape(text))
 }
 
 // closeStream tells the page the task is finished. The sse-close attribute on
@@ -555,4 +626,10 @@ func historyView(run store.Run, tasks []store.Task) ui.HistoryView {
 		}
 	}
 	return ui.HistoryView{Title: title, Outcome: outcome, StartedAt: run.CreatedAt.Local().Format("Jan 2, 15:04")}
+}
+
+// foreignTask reports whether another agentbox process is running this task.
+func (s *server) foreignTask(task store.Task) bool {
+	return (task.Status == store.StatusRunning || task.Status == store.StatusQueued) &&
+		!s.app.Sup.IsRunning(task.ID) && task.OwnerPID != os.Getpid()
 }

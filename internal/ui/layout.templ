@@ -27,7 +27,9 @@ type TaskView struct {
 	StartedMs  int64
 	FinishedMs int64
 	// Detail is the short second line under the status, for example the exit code.
-	Detail  string
+	Detail string
+	// Foreign is true when another agentbox process is running the task.
+	Foreign bool
 	Running bool
 	Message string
 }
@@ -102,6 +104,7 @@ templ Layout(title string, body templ.Component) {
 		</head>
 		<body>
 			@body
+			<div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 		</body>
 	</html>
 }

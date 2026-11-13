@@ -39,6 +39,7 @@ type launchOptions struct {
 	noUI        bool
 	noOpen      bool
 	port        int
+	base        string
 }
 
 func main() {
@@ -116,6 +117,7 @@ func bindLaunchFlags(cmd *cobra.Command, opts *launchOptions) {
 	cmd.Flags().BoolVar(&opts.noUI, "no-ui", false, "do not start the web dashboard")
 	cmd.Flags().BoolVar(&opts.noOpen, "no-open", false, "do not open the dashboard in a browser")
 	cmd.Flags().IntVar(&opts.port, "port", defaultPort, "dashboard port")
+	cmd.Flags().StringVar(&opts.base, "base", "", "branch to start from and merge back into (default: the current branch)")
 }
 
 func validateLaunchOptions(opts launchOptions) error {
@@ -134,6 +136,7 @@ func launch(cmd *cobra.Command, opts launchOptions, create func(*app.App) (*stor
 		return err
 	}
 	defer a.Close()
+	a.Base = opts.base
 
 	run, tasks, err := create(a)
 	if err != nil {

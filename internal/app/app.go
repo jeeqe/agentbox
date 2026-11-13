@@ -18,6 +18,9 @@ type App struct {
 	Store *store.Store
 	WT    *worktree.Manager
 	Sup   *runner.Supervisor
+	// Base is the branch new worktrees are cut from and merged back into. Empty
+	// means whatever branch the repository has checked out when a run starts.
+	Base string
 }
 
 // DataDir returns ~/.agentbox (or $AGENTBOX_HOME), creating it if needed.
@@ -48,14 +51,14 @@ func Open(repoDir, testCmd string, parallelism int) (*App, error) {
 		return nil, err
 	}
 	a := &App{Store: st, WT: wt, Sup: runner.NewSupervisor(st, wt, testCmd, parallelism)}
-	a.reconcileOrphans(context.Background())
+	a.ReconcileOrphans(context.Background())
 	return a, nil
 }
 
-// reconcileOrphans marks tasks as stopped when the process that was running
+// ReconcileOrphans marks tasks as stopped when the process that was running
 // them is gone (a crash, kill -9 or reboot). Without this they would show as
 // running forever, with nothing able to stop them.
-func (a *App) reconcileOrphans(ctx context.Context) {
+func (a *App) ReconcileOrphans(ctx context.Context) {
 	active, err := a.Store.ActiveTasks(ctx)
 	if err != nil {
 		return
@@ -99,9 +102,14 @@ func (a *App) Race(ctx context.Context, prompt string, agents []string) (*store.
 }
 
 func (a *App) launch(ctx context.Context, kind, prompt string, specs []Spec) (*store.Run, []store.Task, error) {
-	base, err := a.WT.CurrentBranch(ctx)
-	if err != nil {
-		return nil, nil, err
+	base := a.Base
+	if base == "" {
+		var err error
+		if base, err = a.WT.CurrentBranch(ctx); err != nil {
+			return nil, nil, err
+		}
+	} else if !a.WT.BranchExists(ctx, base) {
+		return nil, nil, fmt.Errorf("--base %q is not a local branch", base)
 	}
 	if base == "HEAD" {
 		return nil, nil, errors.New("the repository is on a detached HEAD; check out a branch first so results have somewhere to merge")
@@ -181,6 +189,7 @@ func (a *App) MergeAndCleanup(ctx context.Context, id int64) error {
 		return err
 	}
 	_ = a.WT.Remove(ctx, t.WorktreePath, t.Branch)
+	_ = a.Store.ClearLogs(ctx, id)
 	_ = a.Store.SetStatus(ctx, id, store.StatusMerged)
 	if run.Kind == "race" {
 		sibs, _ := a.Store.TasksForRun(ctx, run.ID)
@@ -201,6 +210,7 @@ func (a *App) Discard(ctx context.Context, id int64) error {
 	}
 	a.Sup.Kill(id)
 	_ = a.WT.Remove(ctx, t.WorktreePath, t.Branch)
+	_ = a.Store.ClearLogs(ctx, id)
 	return a.Store.SetStatus(ctx, id, store.StatusDiscarded)
 }
 

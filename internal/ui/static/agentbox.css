@@ -196,6 +196,18 @@ ul { padding: 0; list-style: none; }
 .dl-del code { text-decoration: line-through; text-decoration-thickness: 1px; }
 .diff-empty { padding: 16px 14px; color: var(--muted); }
 
+/* Confirmation after a merge or discard */
+.notice[hidden] { display: none; }
+.notice {
+	position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 10;
+	max-width: min(560px, calc(100vw - 32px)); padding: 10px 16px;
+	border: 1px solid var(--rule-2); border-radius: 8px; background: var(--panel-2); color: var(--text);
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); font-weight: 550;
+}
+
+/* A task run by another agentbox process cannot be stopped from here */
+.lane[data-foreign] .a-kill { display: none; }
+
 /* Removal */
 .lane.is-removing { opacity: 0; transform: translateX(12px); transition: opacity 0.2s ease-out, transform 0.2s ease-out; }
 

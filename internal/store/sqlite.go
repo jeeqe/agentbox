@@ -354,3 +354,12 @@ func (s *Store) ClearLogs(ctx context.Context, taskID int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM logs WHERE task_id=?`, taskID)
 	return err
 }
+
+// TrimLogs keeps only the newest keep log lines of a task.
+func (s *Store) TrimLogs(ctx context.Context, taskID int64, keep int) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM logs WHERE task_id=? AND id <= COALESCE((SELECT id FROM logs WHERE task_id=? ORDER BY id DESC LIMIT 1 OFFSET ?), 0)`, taskID, taskID, keep)
+	return err
+}
+
+// DB exposes the underlying handle for tests that need to set up odd states.
+func (s *Store) DB() *sql.DB { return s.db }

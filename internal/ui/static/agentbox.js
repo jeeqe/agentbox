@@ -21,6 +21,7 @@
 	function syncStatus(lane) {
 		const meta = metaOf(lane);
 		lane.dataset.status = (meta && meta.dataset.taskStatus) || lane.dataset.status || "";
+		if (!isRunning(lane.dataset.status)) lane.removeAttribute("data-foreign");
 	}
 
 	function elapsedSeconds(lane, now) {
@@ -124,6 +125,16 @@
 		keepLogsPinned();
 	}
 
+	let noticeTimer = 0;
+	function showNotice(text) {
+		const el = document.getElementById("notice");
+		if (!el || !text) return;
+		el.textContent = text;
+		el.hidden = false;
+		clearTimeout(noticeTimer);
+		noticeTimer = setTimeout(() => (el.hidden = true), 7000);
+	}
+
 	function removeLane(id) {
 		const lane = document.getElementById("task-card-" + id);
 		if (!lane) return;
@@ -142,7 +153,18 @@
 		}, 240);
 	}
 
-	document.addEventListener("DOMContentLoaded", refresh);
+	document.addEventListener("DOMContentLoaded", () => {
+		refresh();
+		// A notice stored just before the page reloaded into the empty state.
+		try {
+			const saved = JSON.parse(sessionStorage.getItem("agentbox-notice") || "null");
+			sessionStorage.removeItem("agentbox-notice");
+			// Only a fresh one: an old notice must not reappear on a later reload.
+			if (saved && Date.now() - saved.at < 10000) showNotice(saved.text);
+		} catch (_) {
+			sessionStorage.removeItem("agentbox-notice");
+		}
+	});
 	document.addEventListener("htmx:afterSettle", refresh);
 	setInterval(() => {
 		if (document.querySelector('[data-status="running"], [data-status="queued"]')) refresh();
@@ -152,7 +174,15 @@
 	// Read it in beforeSwap, while the clicked button is still in the page.
 	document.addEventListener("htmx:beforeSwap", (e) => {
 		const xhr = e.detail && e.detail.xhr;
-		const ids = xhr && xhr.getResponseHeader("X-Agentbox-Remove");
+		if (!xhr) return;
+		const notice = xhr.getResponseHeader("X-Agentbox-Notice");
+		if (notice) {
+			const text = decodeURIComponent(notice);
+			// If this was the last lane the page reloads, so keep the text across it.
+			sessionStorage.setItem("agentbox-notice", JSON.stringify({ text, at: Date.now() }));
+			showNotice(text);
+		}
+		const ids = xhr.getResponseHeader("X-Agentbox-Remove");
 		if (!ids) return;
 		setTimeout(() => ids.split(",").forEach(removeLane), 60);
 	});

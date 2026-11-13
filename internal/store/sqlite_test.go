@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -181,4 +182,49 @@ INSERT INTO tasks(run_id,agent,prompt,branch,worktree_path,status) VALUES(1,'cla
 		t.Fatalf("reopen: %v", err)
 	}
 	s2.Close()
+}
+
+func TestTrimLogsKeepsNewestLines(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	run := &Run{Kind: "fan-out", RepoPath: "/r", BaseRef: "main"}
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	a := &Task{RunID: run.ID, Agent: "x", Prompt: "p", Branch: "a", WorktreePath: "/a"}
+	b := &Task{RunID: run.ID, Agent: "x", Prompt: "p", Branch: "b", WorktreePath: "/b"}
+	for _, tk := range []*Task{a, b} {
+		if err := s.CreateTask(ctx, tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 1; i <= 10; i++ {
+		for _, tk := range []*Task{a, b} {
+			if err := s.AppendLog(ctx, &LogLine{TaskID: tk.ID, Stream: "stdout", Text: fmt.Sprint("line ", i)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := s.TrimLogs(ctx, a.ID, 3); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Logs(ctx, a.ID, 0, 100)
+	if len(got) != 3 || got[0].Text != "line 8" || got[2].Text != "line 10" {
+		t.Fatalf("task a logs after trim = %+v, want lines 8..10", got)
+	}
+	other, _ := s.Logs(ctx, b.ID, 0, 100)
+	if len(other) != 10 {
+		t.Fatalf("trimming one task removed %d lines from another", 10-len(other))
+	}
+	// Trimming when there is less than the limit changes nothing.
+	if err := s.TrimLogs(ctx, a.ID, 50); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Logs(ctx, a.ID, 0, 100); len(got) != 3 {
+		t.Fatalf("trim below the limit dropped lines: %d left", len(got))
+	}
 }

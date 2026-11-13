@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -300,5 +301,43 @@ func TestGuardRejectsForeignHostAndCrossSitePosts(t *testing.T) {
 	got, err := a.Store.GetTask(context.Background(), task.ID)
 	if err != nil || got.Status != store.StatusDiscarded {
 		t.Fatalf("the allowed same-origin discard should have run once; task = %+v, err %v", got, err)
+	}
+}
+
+func TestMergeSendsNoticeText(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	_, tasks, err := a.Race(ctx, "add a file", []string{"cmd:echo one > one.txt", "cmd:echo two > two.txt", "cmd:echo three > three.txt"})
+	if err != nil {
+		t.Fatalf("race: %v", err)
+	}
+	a.Sup.Wait()
+	rec := httptest.NewRecorder()
+	server.New(a).ServeHTTP(rec, loopbackRequest(http.MethodPost, fmt.Sprintf("/tasks/%d/merge", tasks[1].ID)))
+	got, err := url.PathUnescape(rec.Header().Get("X-Agentbox-Notice"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Merged cmd:echo two > two.txt into main. Removed 2 other worktrees."
+	if got != want {
+		t.Fatalf("notice = %q, want %q", got, want)
+	}
+}
+
+func TestTaskRunByAnotherProcessIsMarkedAndCannotBeStopped(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	_, task := seedTask(t, a)
+	// Make it look like it is running in a different, live process (pid 1).
+	if _, err := a.Store.DB().ExecContext(ctx, `UPDATE tasks SET status='running', owner_pid=1 WHERE id=?`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	server.New(a).ServeHTTP(rec, loopbackRequest(http.MethodGet, "/"))
+	body := rec.Body.String()
+	for _, want := range []string{"running in another agentbox process (pid 1)", "data-foreign"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard is missing %q", want)
+		}
 	}
 }

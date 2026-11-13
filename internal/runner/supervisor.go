@@ -17,6 +17,14 @@ import (
 	"github.com/jeeqe/agentbox/internal/worktree"
 )
 
+const (
+	// maxStoredLines bounds the log history kept per task, so a chatty agent
+	// cannot grow the database without limit. Older lines are dropped first.
+	maxStoredLines = 20000
+	// trimEvery is how many new lines are written between trims.
+	trimEvery = 2000
+)
+
 // AgentSpec describes how to invoke an agent CLI non-interactively.
 type AgentSpec struct {
 	Bin  string
@@ -68,6 +76,7 @@ type Supervisor struct {
 	Parallelism int
 
 	mu      sync.Mutex
+	lines   map[int64]int // log lines written per task, for periodic trimming
 	running map[int64]context.CancelFunc
 	subs    map[chan Event]struct{}
 	sem     chan struct{}
@@ -76,7 +85,7 @@ type Supervisor struct {
 
 func NewSupervisor(s *store.Store, wt *worktree.Manager, testCmd string, parallelism int) *Supervisor {
 	sv := &Supervisor{Store: s, WT: wt, TestCmd: testCmd, Parallelism: parallelism,
-		running: map[int64]context.CancelFunc{}, subs: map[chan Event]struct{}{}}
+		running: map[int64]context.CancelFunc{}, lines: map[int64]int{}, subs: map[chan Event]struct{}{}}
 	if parallelism > 0 {
 		sv.sem = make(chan struct{}, parallelism)
 	}
@@ -163,6 +172,13 @@ func (sv *Supervisor) emitLog(taskID int64, stream, text string) {
 		return
 	}
 	sv.publish(Event{TaskID: taskID, Kind: "log", Log: l})
+	sv.mu.Lock()
+	sv.lines[taskID]++
+	trim := sv.lines[taskID]%trimEvery == 0
+	sv.mu.Unlock()
+	if trim {
+		_ = sv.Store.TrimLogs(context.Background(), taskID, maxStoredLines)
+	}
 }
 
 // runCmd runs a command to completion in dir, streaming output into the task log.
