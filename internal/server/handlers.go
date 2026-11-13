@@ -413,10 +413,13 @@ func clock(task store.Task, now time.Time) string {
 	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
 }
 
-// taskDetail is the short second line under a lane's status. Running tasks
-// get their latest output line from the browser instead, so it stays empty.
+// taskDetail is the short second line under a lane's status. A running task
+// starts with the command that launched it; the browser replaces that with the
+// latest non-empty output line once there is one.
 func taskDetail(task store.Task, status string) string {
 	switch status {
+	case store.StatusRunning, store.StatusQueued:
+		return "$ " + strings.TrimPrefix(task.Agent, "cmd:")
 	case store.StatusFailed:
 		switch {
 		case task.ExitCode == nil:

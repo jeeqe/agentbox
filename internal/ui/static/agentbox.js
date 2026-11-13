@@ -73,10 +73,17 @@
 			if (!isRunning(lane.dataset.status)) return;
 			const time = lane.querySelector("[data-clock]");
 			if (time) time.textContent = clock(times[i]);
-			// While an agent runs, its latest output line is the second line.
+			// While an agent runs, show its latest non-empty output line. The
+			// launched command stays until the first one arrives.
 			const tick = lane.querySelector("[data-tick]");
-			const last = lane.querySelector(".log-output")?.lastElementChild;
-			if (tick && last) tick.textContent = last.textContent;
+			const lines = lane.querySelectorAll(".log-output .terminal-line");
+			for (let n = lines.length - 1; tick && n >= 0; n--) {
+				const text = lines[n].textContent.trim();
+				if (text) {
+					tick.textContent = text.length > 200 ? text.slice(0, 200) + "…" : text;
+					break;
+				}
+			}
 		});
 		drawAxis(run, axis);
 		markFirst(run);
@@ -93,7 +100,15 @@
 			else if (s === "failed" || s === "conflict") count.failed++;
 			else if (isRunning(s)) count.running++;
 		});
-		el.textContent = `${count.total} agents, ${count.passed} passed, ${count.failed} failed, ${count.running} running`;
+		const text = `${count.total} agents, ${count.passed} passed, ${count.failed} failed, ${count.running} running`;
+		// Only touch the text when it changed, so a screen reader is not told
+		// the same summary again every second.
+		if (el.textContent !== text) el.textContent = text;
+		// The tab title carries the state too, for when the dashboard sits in a background tab.
+		const title = count.total === 0 ? "AgentBox"
+			: count.running ? `AgentBox · ${count.running} running, ${count.passed} passed`
+			: `AgentBox · ${count.passed}/${count.total} passed`;
+		if (document.title !== title) document.title = title;
 	}
 
 	function keepLogsPinned() {

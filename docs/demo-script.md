@@ -20,8 +20,14 @@ the agent CLIs logged in, so it has to be recorded on your own machine.
    `main`: dashed amber while it runs, growing as time passes, then green with a check when its
    tests pass, or red with a cross if they fail. The first agent to pass gets the "first to pass"
    tag and a blue **Merge** button.
-3. 0:07 to 0:10. Click **Inspect diff** on that agent so the changes open under its lane, then
-   click **Merge**. All the lanes slide away and `git log` shows the merge.
+3. 0:07 to 0:10. This half is what makes people try it, so it has to show the finish:
+   - a lane with the green check, **Tests passed** and its `+lines −lines` counts,
+   - **Inspect diff** open under it for a second or two,
+   - the click on **Merge**, the lanes sliding away, and a `git log` in the terminal showing
+     the merge commit. Hold on that last frame for about a second.
+
+   If the clip ends while agents are still running, it has not shown the payoff. Use `--test`
+   and a task that finishes in under a minute so at least one lane passes on camera.
 
 If the real agents are too slow for ten seconds, trim in editing rather than speeding up the
 terminal text.
@@ -34,3 +40,9 @@ ffmpeg -i demo.mov -vf "fps=30,scale=1280:-1:flags=lanczos,split[s0][s1];[s0]pal
 
 Keep the file under about 8 MB. If it's bigger, lower `fps` to 20 or `scale` to 1000.
 Then replace the comment near the top of `README.md` with `![demo](docs/demo.gif)`.
+
+## Before recording
+
+Record from a build that includes the log fixes (v0.1.1 or later). Older builds print raw
+colour codes as `□[0m` under a lane, and leave the status line blank for agents that think
+before they print.

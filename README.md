@@ -1,24 +1,28 @@
 # AgentBox
 
-Run parallel coding agents in isolated Git worktrees from a single 13.5 MB Go binary.
+Run parallel coding agents in isolated Git worktrees from a single 13 MB Go binary.
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/jeeqe/agentbox)](https://goreportcard.com/report/github.com/jeeqe/agentbox)
 [![Release](https://img.shields.io/github/v/release/jeeqe/agentbox)](https://github.com/jeeqe/agentbox/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Binary size](https://img.shields.io/badge/binary-13.5%20MB-informational)
+![Binary size](https://img.shields.io/badge/binary-13%20MB-informational)
 
 ![AgentBox dashboard demo](docs/demo.gif)
 
 ## Quickstart
 
 ```bash
-go install github.com/jeeqe/agentbox/cmd/agentbox@latest   # or grab a release binary
+# install (or grab a release binary from the Releases page)
+go install github.com/jeeqe/agentbox/cmd/agentbox@latest
+
 cd your-repo
 agentbox run "add rate limiting" "write unit tests" "update API docs"
 ```
 
-Each prompt gets its own worktree and branch. A dashboard opens on `http://localhost:8484`
-with live output from every agent, a diff counter, and a button to merge the result.
+Each prompt gets its own worktree and branch. The dashboard opens in your browser, starting at
+`http://127.0.0.1:8484`. If that port is taken, AgentBox uses the next free one and prints the
+address it picked. The page shows live output from every agent, a diff counter, and a button
+to merge the result.
 
 ## Why
 

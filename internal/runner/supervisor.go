@@ -3,7 +3,6 @@
 package runner
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -185,11 +184,7 @@ func (sv *Supervisor) runCmd(ctx context.Context, cmd *exec.Cmd, dir string, env
 	var wg sync.WaitGroup
 	pump := func(r io.Reader, stream string) {
 		defer wg.Done()
-		sc := bufio.NewScanner(r)
-		sc.Buffer(make([]byte, 64*1024), 1024*1024)
-		for sc.Scan() {
-			sv.emitLog(taskID, stream, sc.Text())
-		}
+		readLines(r, func(line string) { sv.emitLog(taskID, stream, line) })
 	}
 	wg.Add(2)
 	go pump(stdout, "stdout")
