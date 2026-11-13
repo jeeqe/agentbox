@@ -49,6 +49,12 @@ homebrew_casks:
       - default
     binaries:
       - agentbox
+    # The binary is not notarized. Without this, macOS Gatekeeper blocks the
+    # first run of a Homebrew-installed copy with "cannot verify the developer".
+    hooks:
+      pre:
+        install_steps: |
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/agentbox"]
     homepage: https://github.com/jeeqe/agentbox
     description: Run multiple AI coding agents in parallel git worktrees.
     repository:
