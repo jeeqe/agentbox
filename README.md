@@ -61,20 +61,23 @@ side by side, merge the one you like, and the others are discarded.
   the agent's commits.
 - Each task gets its own `PORT` (3001, 3002, ...), skipping ports already in use.
 - stdout and stderr stream to the dashboard over SSE and are stored in SQLite
-  (`~/.agentbox/agentbox.db`, or `$AGENTBOX_HOME`).
+  (`~/.agentbox/agentbox.db`, or `$AGENTBOX_HOME`). Terminal colour codes are stripped, the
+  newest 20,000 lines per task are kept, and a task's log is deleted when you merge or discard it.
 - When an agent finishes, its changes are committed on its branch so the diff is stable.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `agentbox run [prompts...]` | One agent per prompt (`--agent`, `--test`, `--parallel`) |
+| `agentbox run [prompts...]` | One agent per prompt (`--agent`, `--test`, `--parallel`, `--base`) |
 | `agentbox race "prompt"` | Same prompt across `--agents a,b,c` |
 | `agentbox ui` | Start the dashboard for existing runs |
 | `agentbox ls` | List tasks, status and diff size |
 | `agentbox clean` | Remove active worktrees and branches for this repo |
 
-Common flags: `--port` (default 8484), `--no-ui`, `--no-open`.
+Common flags: `--port` (default 8484), `--no-ui`, `--no-open`, and `--base <branch>` to cut the
+worktrees from, and merge back into, a branch other than the one you have checked out. To merge,
+that branch has to be the one checked out in your main working tree.
 
 ## Custom agents
 
@@ -95,6 +98,10 @@ AgentBox on repos and machines where you're fine with that, or use a container.
 Merging needs a clean main working tree. If a merge conflicts, it's aborted, the task shows
 `CONFLICT`, and nothing in your main branch changes.
 
+The dashboard only listens on `127.0.0.1`. It also rejects requests with a non-local `Host`
+header and state-changing requests that come from another site, so a web page open in your
+browser can't merge or discard your branches. Don't put it behind a public reverse proxy.
+
 ## Install
 
 ```bash
@@ -104,9 +111,14 @@ go install github.com/jeeqe/agentbox/cmd/agentbox@latest
 # Script (checks the release checksum)
 curl -fsSL https://raw.githubusercontent.com/jeeqe/agentbox/main/scripts/install.sh | sh
 
-# Homebrew, macOS only (works once the first release is tagged)
+# Homebrew (macOS, Intel and Apple Silicon)
 brew install jeeqe/tap/agentbox
 ```
+
+Release binaries for macOS, Linux and Windows are on the
+[Releases page](https://github.com/jeeqe/agentbox/releases). The macOS binary isn't notarized.
+If you download it in a browser, clear the quarantine flag once with
+`xattr -d com.apple.quarantine ./agentbox`. The Homebrew and curl installs don't need this.
 
 ## Build from source
 
@@ -116,7 +128,8 @@ make test      # go test -race ./...
 make generate  # regenerate templ files
 ```
 
-Needs Go 1.26 or newer and [templ](https://templ.guide) if you change the `.templ` files.
+Needs Go 1.26 or newer. With Go 1.21 or later, the `go` command downloads the right toolchain
+for you. You only need [templ](https://templ.guide) if you change the `.templ` files.
 
 ## License
 
